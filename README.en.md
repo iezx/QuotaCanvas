@@ -1,6 +1,6 @@
 # QuotaCanvas
 
-English · [繁體中文](README.md)
+[简体中文](README.md) · [繁體中文](README.zh-TW.md) · English
 
 A browser dashboard for local Codex, Antigravity, Claude Code, and DeepSeek Harness usage. For supported agents, it also displays quotas, reads conversations, and schedules messages.
 

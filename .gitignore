@@ -1,0 +1,19 @@
+# Runtime data contains credentials, private conversations and usage history.
+data/
+stats-cache.json
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+.env
+.env.*
+*.log
+*.sqlite*
+*.db
+*.jsonl
+*.jsonl.zst
+node_modules/
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store

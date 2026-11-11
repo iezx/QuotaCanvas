@@ -1,0 +1,63 @@
+@import "tailwindcss" source(none);
+@source "./overview.js";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+}
+
+:root {
+  --background: oklch(100% 0 0);
+  --foreground: oklch(14.5% 0 0);
+  --muted: oklch(97% 0 0);
+  --muted-foreground: oklch(55.6% 0 0);
+  --border: oklch(92.2% 0 0);
+  --input: oklch(92.2% 0 0);
+  --ring: oklch(70.8% 0 0);
+  --popover: oklch(100% 0 0);
+  --popover-foreground: oklch(14.5% 0 0);
+  --destructive: oklch(57.7% .245 27.325);
+}
+
+.dark {
+  --background: oklch(14.5% 0 0);
+  --foreground: oklch(98.5% 0 0);
+  --muted: oklch(26.9% 0 0);
+  --muted-foreground: oklch(70.8% 0 0);
+  --border: oklch(100% 0 0 / .1);
+  --input: oklch(100% 0 0 / .15);
+  --ring: oklch(55.6% 0 0);
+  --popover: oklch(20.5% 0 0);
+  --popover-foreground: oklch(98.5% 0 0);
+  --destructive: oklch(70.4% .191 22.216);
+}
+
+@layer base {
+  * { border-color: var(--border); }
+  body { background: var(--background); color: var(--foreground); }
+  button:not(:disabled), select { cursor: pointer; }
+  button:focus-visible, select:focus-visible, a:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+.qc-brand { display: inline-flex; align-items: baseline; gap: .5rem; font-size: 18px; font-weight: 600; letter-spacing: -.025em; }
+.qc-version { color: var(--muted-foreground); font: 11px var(--default-mono-font-family, ui-monospace, monospace); letter-spacing: 0; }
+
+/* Keep the original model table widths across desktop and mobile. */
+.grid-cols-\[minmax\(0\,1fr\)_4\.5rem_7\.5rem\] { grid-template-columns: minmax(0,1fr) 4.5rem 9rem; }
+@media (min-width: 640px) {
+  .sm\:grid-cols-\[minmax\(0\,14rem\)_minmax\(0\,1fr\)_4\.5rem_7\.5rem\] {
+    grid-template-columns: minmax(0,13.5rem) minmax(0,1fr) 4.5rem 9rem;
+  }
+}

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>QuotaCanvas v0.0.1</title>
+    <script type="module" src="/assets/index.js"></script>
+    <link rel="stylesheet" href="/assets/auth.css" />
+    <link rel="stylesheet" href="/assets/index.css" />
+  </head>
+  <body>
+    <div id="login-fallback" hidden style="padding:16px 32px;text-align:right"><button type="button" data-auth-login style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;color:inherit;cursor:pointer">登录</button></div>
+    <div id="root"></div>
+    <script src="/assets/i18n.js"></script>
+    <script src="/assets/auth.js"></script>
+    <script>window.fetch=SiteAuth.fetch;</script>
+  </body>
+</html>

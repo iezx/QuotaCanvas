@@ -1,0 +1,134 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="color-scheme" content="light dark"><link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>额度预计 · 对话定时 · AI 用量</title><link rel="stylesheet" href="/assets/index.css?v=9084eb67e053"><link rel="stylesheet" href="/assets/auth.css?v=fccd2d79cd8c">
+<style>
+body{background:var(--background);color:var(--foreground);font-family:var(--default-font-family,system-ui);font-size:14px;margin:0}
+.wrap{max-width:1360px;margin:auto;padding:16px 16px 64px}@media(min-width:640px){.wrap{padding:32px 48px 64px}}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}
+header h1{font-size:15px;font-weight:600;margin:0}
+a.nb,.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:12px;color:var(--muted-foreground);background:transparent;cursor:pointer;text-decoration:none;font-family:inherit}
+a.nb:hover,.btn:hover{background:var(--muted);color:var(--foreground)}.btn.d:hover{color:var(--destructive)}
+section{margin-top:48px}section>h2{font-size:12px;font-weight:500;color:var(--muted-foreground);margin:0 0 12px}
+.grid{display:grid;grid-template-columns:1fr;gap:16px}@media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+.card{border:1px solid var(--border);border-radius:10px;padding:16px;margin:0}
+.ch{display:flex;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:4px;flex-wrap:wrap}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.tag{border:1px solid var(--border);background:color-mix(in oklch,var(--muted) 50%,transparent);border-radius:6px;padding:1px 8px;font:11px var(--default-mono-font-family,monospace);color:var(--muted-foreground)}
+.tag.warn{color:#da7756;border-color:#da775655}
+.qb{padding:8px 0;border-bottom:1px solid var(--muted)}.qb:last-child{border:0}
+.between{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12px}
+.fw{font-weight:500}.mono{font-family:var(--default-mono-font-family,monospace)}.mut,.sub{color:var(--muted-foreground)}.sub{font-size:11px;opacity:.85}
+.bar{height:8px;border-radius:99px;background:var(--muted);overflow:hidden;margin:6px 0}.bar i{display:block;height:100%;border-radius:99px}
+.fc{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.grp{margin-top:10px}.gt{font-size:12px;font-weight:600;margin-top:6px}
+table{width:100%;border-collapse:collapse;font-size:13px}th{font-weight:400;font-size:12px;color:var(--muted-foreground);text-align:left;height:32px;padding:4px 12px 4px 0;border-bottom:1px solid var(--border);white-space:nowrap}
+td{height:38px;border-bottom:1px solid var(--muted);padding:6px 12px 6px 0;vertical-align:middle}tr:last-child td{border:0}
+input,select,textarea{background:transparent;color:var(--foreground);border:1px solid var(--input);border-radius:6px;padding:6px 8px;font:inherit;font-size:13px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}details summary{cursor:pointer;font-size:12px;color:var(--muted-foreground);margin-top:10px}
+#convtitle{font-size:13px;overflow-wrap:anywhere}.reader-head{margin-top:16px;justify-content:space-between}
+#msgs{height:52vh;min-height:240px;max-height:720px;overflow:auto;overscroll-behavior:contain;border:1px solid var(--border);border-radius:8px;padding:12px;margin:10px 0 20px;color:var(--muted-foreground)}
+.message{border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;color:var(--foreground)}.message:last-child{margin-bottom:0}
+.message.user{background:color-mix(in oklch,var(--muted) 45%,transparent)}.message-header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted-foreground);margin-bottom:8px}
+.message-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75;font-size:13px}.btn:disabled{opacity:.5;cursor:default}.btn[hidden]{display:none}
+</style></head><body><div class="wrap">
+<header><div><a class="page-brand" href="/">QuotaCanvas <small>v0.0.1</small></a><h1>额度预计 · 对话定时发送</h1></div>
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="sub" id="upd"></span><button class="btn" type="button" data-language-switch>English</button><button class="btn" type="button" data-auth-login>登录</button><a class="nb" href="/pricing.html">模型与价格</a><a class="nb" href="/settings.html">设置</a><a class="nb" href="/">← 用量总览</a></div></header>
+<section style="margin-top:0"><h2>实时使用额度与预计（官方接口，每分钟刷新）</h2><div id="live" class="grid">加载中…</div></section>
+<section><h2>本机对话阅读与发送</h2><div class="card"><p class="sub" id="command-help"></p>
+ <div class="row" style="margin-top:0"><select id="src" aria-label="对话来源"><option value="all">全部来源</option><option value="codex">Codex</option><option value="agy">AGY</option><option value="cc">Claude Code</option></select>
+ <select id="conv" aria-label="选择本机对话" style="flex:1;min-width:260px"></select><button class="btn" type="button" onclick="loadConvs()">刷新列表</button><button class="btn" type="button" id="new-conversation">新建对话</button></div>
+ <div class="row reader-head"><strong id="convtitle">选择对话查看记录</strong><span class="sub" id="msgstatus" role="status" aria-live="polite"></span></div>
+ <div class="row"><button class="btn" id="oldermsgs" type="button" hidden onclick="showMsgs(true)">加载更早消息</button>
+ <button class="btn" id="refreshmsgs" type="button" onclick="showMsgs()">刷新对话</button></div>
+ <div id="msgs" role="region" aria-label="用户与助手对话记录" tabindex="0">选择对话后显示完整记录</div>
+ <section id="conversation-questions" hidden aria-live="polite"></section>
+ <div class="row"><span class="sub">模型:</span><select id="model" onchange="$('cmodel').style.display=this.value==='__custom__'?'inline-block':'none'"></select>
+ <input id="cmodel" style="display:none;width:170px" placeholder="输入自定义模型 ID"><span id="model-description" class="sub"></span>
+ <span class="sub">思考强度:</span><select id="effort">
+  <option value="">默认强度 (Default)</option>
+  <option value="none">none</option>
+  <option value="minimal">minimal</option>
+  <option value="low">low（低 · 省额度）</option>
+  <option value="medium">medium（中）</option>
+  <option value="high">high（高）</option>
+  <option value="xhigh">xhigh（超高）</option>
+  <option value="max">max（最高 Max）</option>
+  <option value="ultra">ultra</option>
+ </select></div>
+ <div class="row"><textarea id="prompt" rows="2" style="flex:1;min-width:260px" placeholder="要发送的消息，如：请继续"></textarea></div>
+ <div class="row"><button class="btn" onclick="sendNow()">立即发送</button>
+  <select id="stype"><option value="once">指定时间一次</option><option value="daily">每天</option><option value="interval">每隔 N 分钟</option><option value="on_quota_reset">额度重置后自动发送</option></select>
+  <input id="sval" placeholder="2026-11-01T09:00 / 09:00 / 60"><button class="btn" onclick="addSched()">添加定时</button></div>
+ </div></section>
+<section><h2>定时任务</h2><div id="sch"></div></section>
+<section><h2>发送记录</h2><div id="his"></div></section>
+
+</div>
+<script src="/assets/i18n.js?v=3e2db23fa633"></script><script src="/assets/auth.js?v=b462f24d1d78"></script>
+<script src="/assets/conversation-questions.js?v=f43682293dbc"></script><script src="/assets/conversations.js?v=78e309fc7780"></script>
+<script>
+window.fetch=SiteAuth.fetch;
+const $=id=>document.getElementById(id);const tr=window.QCi18n.t;let convs=[];
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=t=>t?new Date(t*1000).toLocaleString(window.QCi18n.english?'en-US':'zh-CN'):'—';
+const dur=s=>{s=Math.max(0,s|0);const h=s/3600|0,m=s%3600/60|0;return window.QCi18n.english?(h?h+'h '+m+'m':m+'m'):(h?h+'小时'+m+'分':m+'分')};
+const col=p=>p>=100?'#da7756':p>=80?'#d4a72c':'#10a37f';
+function bar(label,w){if(!w||w.used_percent==null)return'';const used=+w.used_percent,rem=(100-used).toFixed(1),fc=w.forecast||{};
+ if(window.QCi18n.english){label=w.window_minutes===300?'5-hour window':w.window_minutes===10080?'7-day window':(label.match(/\(([^)]+)\)/)?.[1]||'Quota window')}
+ const ftxt=w.forecast_text||(window.QCi18n.english?(fc.status==='exhausted'?'Limit reached':`Projected use: ${fc.projected_used_percent??used}%`):(fc.status==='exhausted'?`已达 100% 额度上限，${dur((w.resets_at||0)-Date.now()/1000)}后自动重置`:`预计重置时累计使用 ${fc.projected_used_percent??used}%`));
+ const fcls=(fc.status==='exhausted'||fc.status==='will_exhaust')?'tag warn':'tag';
+ const cbox=w.cost_text?`<div class="between sub" style="margin-top:5px;padding:4px 8px;border-radius:6px;background:color-mix(in oklch,var(--muted) 45%,transparent)"><span>${tr('API 额度折算与预测','API-equivalent estimate and forecast')}</span><span class="mono" style="color:var(--foreground)">${esc(w.cost_text)}</span></div>`:'';
+ return `<div class="qb"><div class="between"><span class="fw">${esc(label.replace(' Remaining',''))}</span><span class="mono mut">${tr('已用','Used')} ${used.toFixed(1)}% · <b>${tr('剩余','Remaining')} ${rem}%</b></span></div>
+ <div class="bar"><i style="width:${Math.min(100,Math.max(used>0?2:0,used))}%;background:${col(used)}"></i></div>
+ <div class="between sub"><span>${tr('重置时间','Reset')}: ${fmt(w.resets_at)}${window.QCi18n.english?'':`（${dur((w.resets_at||0)-Date.now()/1000)}后）`}</span><span class="${fcls}">${esc(ftxt)}</span></div>${cbox}</div>`}
+const subscription=q=>q.subscription_start?`<p class=sub>${tr('订阅周期: ','Subscription period: ')}${esc(q.subscription_start)} ~ ${esc(q.subscription_until||'—')}</p>`:'';
+async function loadLive(){const d=await (await fetch('/api/live')).json();let h='';
+ const c=d.codex;h+=`<div class=card><div class=ch><span class=dot style="background:#10a37f"></span><b>OpenAI Codex</b><span class=tag>${esc((c.plan_type||'').toUpperCase())}</span><span class=tag>${c.source_of_truth==='live'?'官方实时':'本地日志'}</span>${c.limit_reached?'<span class="tag warn">已达上限</span>':''}</div>`;
+ h+=subscription(c);
+ for(const k of ['primary','secondary'])if(c[k])h+=bar(c[k].label||'窗口额度',c[k]);
+ if(!c.primary&&!c.secondary)h+='<div class=sub>暂无额度窗口数据</div>';
+ if(c.window_5h_local)h+=`<div class=sub style="margin-top:8px">${tr('近 5 小时本地累计','Local total, last 5 hours')}: ${esc(Number(c.window_5h_local.tokens||0).toLocaleString())} tokens · ${tr('API 等价','API equivalent')} ≈$${esc(c.window_5h_local.cost)}</div>`;h+='</div>';
+ const a=d.agy;h+=`<div class=card><div class=ch><span class=dot style="background:#8b5cf6"></span><b>Antigravity (AGY)</b><span class=tag>${a.source_of_truth==='live'?'官方实时':'本地日志'}</span></div>`;
+ h+=subscription(a);
+ if(a.groups){for(const g of a.groups){h+=`<div class=grp><div class=gt>${esc(g.name)}</div>`;
+  for(const b of g.buckets)h+=bar(b.name,b);h+='</div>'}
+  h+=`<details><summary>所有模型 (${a.models.length})</summary><table><tr><th>模型<th>剩余<th>重置</tr>`+a.models.map(m=>`<tr><td>${esc(m.name)}<td>${esc(m.remaining_percent)}%<td>${fmt(m.resets_at)}`).join('')+'</table></details>'}
+ else h+=`<div class=m>实时接口不可用: ${esc(a.error)}</div>`;h+='</div>';
+ h+=`<div class=card><div class=ch><span class=dot style="background:#d97757"></span><b>Claude Code</b>${d.cc.installed?'<span class=tag>已检测到 ~/.claude</span><span class=sub>套餐 '+esc(d.cc.plan||'未知')+'</span>':'<span class=sub>未安装 · 接口已预留，安装后自动统计 ~/.claude/projects</span>'}</div>${subscription(d.cc)}</div>`;
+ $('live').innerHTML=h;$('upd').textContent=tr('更新于 ','Updated at ')+new Date().toLocaleTimeString(window.QCi18n.english?'en-US':'zh-CN',{hour12:false})}
+const MODELS_BY_SRC={
+ codex:['gpt-6-astra','gpt-6.1-terra','gpt-6.1-sol','gpt-6-sol','gpt-6-luna','gpt-5.6-sol','gpt-5.6-luna','o3','o4-mini','gpt-5','gpt-5-mini'],
+ agy:['gemini-4-argon','gemini-3.8-flash','claude-sonnet-5-5','claude-opus-5-5','gpt-oss-120b-medium','gemini-3.5-flash-lite','gemini-4-argon-high','gemini-4-argon-medium','gemini-4-argon-low','gemini-3.8-flash-high','gemini-3.8-flash-medium','gemini-3.8-flash-low','claude-sonnet-5-5-high','claude-sonnet-5-5-medium','claude-sonnet-5-5-low','claude-opus-5-5-high','claude-opus-5-5-medium','claude-opus-5-5-low'],
+ cc:['claude-opus-4-5','claude-sonnet-4-5','claude-haiku-4-5','opus','sonnet','haiku']
+};
+function syncModelOpts(c){
+ const ms=MODELS_BY_SRC[c?.source]||[];
+ const defTxt=c?.model?(window.QCi18n.english?`Default model (follow conversation: ${c.model})`:`默认模型（跟随对话: ${c.model}）`):tr('默认模型（跟随对话）','Default model (follow conversation)');
+ $('model').innerHTML=`<option value="">${esc(defTxt)}</option>`+ms.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')+'<option value="__custom__">自定义模型...</option>';
+ $('cmodel').style.display='none';
+}
+const getSelModel=()=>($('model').value==='__custom__'?$('cmodel').value.trim():$('model').value);
+const cur=()=>{const c=convs[$('conv').value];return{source:c.source,conv_id:c.id,conv_title:c.title.slice(0,80),cwd:c.cwd,model:getSelModel(),effort:$('effort').value,prompt:$('prompt').value||tr('请继续','Please continue')}};
+async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}),data=await r.json();if(!r.ok)throw new Error(data.error||'HTTP '+r.status);return data}
+async function sendNow(){
+ const text=$('prompt').value.trim();
+ try{if(text.startsWith('/')&&await window.QCCommands?.handleClient(text)){$('prompt').value='';return}
+ if(!convs.length)return;if(!await SiteAuth.confirm(tr('确认向该对话发送消息？','Send this message to the selected conversation?')))return;
+ const data=await post('/api/send',cur());if(data.error)throw new Error(data.error);
+ if(data.command){await window.QCCommands.completed(text,data.result);$('msgstatus').textContent=tr('命令已执行','Command executed')}else $('msgstatus').textContent=tr('已提交发送','Message submitted');loadSch();
+ }catch(error){$('msgstatus').textContent=tr('发送失败：','Send failed: ')+error.message}
+}
+async function addSched(){if(!convs.length)return;const b=cur(),t=$('stype').value,v=$('sval').value;b.schedule_type=t;
+ if(t==='once')b.run_at=v;if(t==='daily')b.daily_time=v||'09:00';if(t==='interval')b.interval_minutes=+v||60;try{await post('/api/schedules',b);loadSch()}catch(e){$('msgstatus').textContent='添加定时失败：'+e.message}}
+const fmtME=(m,e)=>(m||e)?`<span class="tag">${esc(m||'默认模型')}${e?' · '+esc(e):''}</span>`:'<span class="sub">默认</span>';
+const fmtNext=s=>s.schedule_type==='on_quota_reset'?(s.next_run_at?`${fmt(s.next_run_at)} <span class="tag warn">${esc(s.quota_status||'等待重置发送')}</span>`:`<span class="sub">${esc(s.quota_status||'循环监控中（待额度耗尽后自动锁定重置时间）')}</span>`):fmt(s.next_run_at);
+const fmtType=s=>s.schedule_type==='on_quota_reset'?'on_quota_reset (循环)':esc(s.schedule_type);
+async function loadSch(){let d;try{const r=await fetch('/api/schedules');if(!r.ok)return;d=await r.json()}catch{return}
+ $('sch').innerHTML=d.schedules.length?'<table><tr><th>对话<th>模型 / 强度<th>类型<th>消息<th>下次 / 监控状态<th>状态<th></tr>'+d.schedules.map(s=>`<tr><td>[${esc(s.source)}] ${esc(s.conv_title)}<td>${fmtME(s.model,s.effort)}<td>${fmtType(s)}<td>${esc(s.prompt.slice(0,40))}<td>${fmtNext(s)}<td>${s.enabled?'启用':'停用'} · 已执行${esc(s.run_count)}
+ <td><button class=btn onclick="tog(${esc(JSON.stringify(String(s.id)))},${!s.enabled})">${s.enabled?'停用':'启用'}</button> <button class="btn d" onclick="del(${esc(JSON.stringify(String(s.id)))})">删</button>`).join('')+'</table>':'<div class=sub>暂无</div>';
+ $('his').innerHTML=d.history.length?'<table><tr><th>时间<th>对话<th>模型 / 强度<th>触发<th>状态<th>输出</tr>'+d.history.slice(0,15).map(h=>`<tr><td>${fmt(h.started_at)}<td>[${esc(h.source)}] ${esc(h.conv_title)}<td>${fmtME(h.model,h.effort)}<td>${esc(h.trigger_reason)}<td>${esc(h.status)}<td>${esc((h.output||'').slice(-120))}`).join('')+'</table>':'<div class=sub>暂无</div>'}
+async function tog(id,en){await post('/api/schedules',{id,enabled:en});loadSch()}
+async function del(id){await post('/api/schedules',{id,delete:true});loadSch()}
+$('src').onchange=loadConvs;$('conv').onchange=selectConv;
+loadLive().catch(()=>{});loadConvs();loadSch();setInterval(()=>loadLive().catch(()=>{}),60000);setInterval(loadSch,15000);
+</script><script src="/assets/model-catalog.js?v=59f8bd982d54"></script><script src="/assets/new-conversation.js?v=fbefd089c8ff"></script><script src="/assets/commands-ui.js?v=207e43d8d504"></script></body></html>

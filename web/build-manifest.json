@@ -1,0 +1,15 @@
+{
+  "inputs": {
+    "package.json": "ec2970872d36fb387e72fc1f55ae1262e68cf565f85ef60083d96ab75b4dcec2",
+    "package-lock.json": "d6466af4179ac3a907ca23280d4e843ef546a8a8278e4bfb85151a29583e2176",
+    "web/build.cjs": "dab6f88f7f838a86cbc0cee9625a14d7d5d54009990a7745466e649a011c38b8",
+    "web/src/overview.js": "2613c1dbd71da9b9120911404e582d7422e0291f86c34058fcd7f2b6ff488c34",
+    "web/src/overview.css": "7de0b9fac3f3e9b0e457a6c3b7c5af34ed8262aab1d022021aba75b7171af28e",
+    "web/src/index.html": "b651308fab4add5fbd2e873507489f862f50ac52a7589558894e9ca8f8e6a8cb"
+  },
+  "outputs": {
+    "web/assets/index.js": "9ad7ba7a4cf2fc6cabbc65f39bba8afa3014b02909afad21e5df355ce0d9e451",
+    "web/assets/index.css": "9084eb67e053fda8c2b439a230dd981df2c9a8798b9b3aabb922ced8b3b1d7bd",
+    "THIRD_PARTY_NOTICES": "ced20cdb6f449e262a0126460c2c315c8ac1e81858f977c28200bcb1fa3e7469"
+  }
+}

@@ -1,0 +1,4 @@
+# Cloudflare Access JWT signature verification; current supported security release
+cryptography>=50.0.2
+# Bundled streaming support for Codex .jsonl.zst logs
+zstandard>=0.25.0

@@ -6,10 +6,90 @@ from pathlib import Path
 import re
 
 from compressed_logs import iter_log_lines
+from pricing import DEFAULT_PRICES, ID_RE
 
 DSH_HOME = Path(os.environ.get('DSH_HOME') or Path.home() / '.dsh').expanduser()
 AGY_SELECTION = re.compile(r"changed setting `Model Selection` from .*? to ([^\n]+?)\. No need")
 DSH_JOURNAL = re.compile(r'session(?:\.v([0-9]+))?\.jsonl(?:\.(zst|zstd))?$')
+
+AGY_MODEL_MAP: dict[str, str] = {
+    "gemini 4 argon (high)": "gemini-4-argon-high",
+    "gemini 4 argon (medium)": "gemini-4-argon-medium",
+    "gemini 4 argon (low)": "gemini-4-argon-low",
+    "gemini 4 hydrogen (xhigh)": "gemini-4-hydrogen-xhigh",
+    "gemini 4 hydrogen (high)": "gemini-4-hydrogen-high",
+    "gemini 4 hydrogen (medium)": "gemini-4-hydrogen-medium",
+    "gemini 4 hydrogen (low)": "gemini-4-hydrogen-low",
+    "gemini 4 carbon (xhigh)": "gemini-4-carbon-xhigh",
+    "gemini 4 carbon (high)": "gemini-4-carbon-high",
+    "gemini 4 carbon (medium)": "gemini-4-carbon-medium",
+    "gemini 4 carbon (low)": "gemini-4-carbon-low",
+    "orchestrator (argon)": "gemini-pro-orchestrator-g1-pro",
+    "gemini 3.8 flash (high)": "gemini-3.8-flash-high",
+    "gemini 3.8 flash (medium)": "gemini-3.8-flash-medium",
+    "gemini 3.8 flash (low)": "gemini-3.8-flash-low",
+    "gemini 3.5 flash lite": "gemini-3.5-flash-lite",
+    "gemini 3.1 flash lite": "gemini-3.1-flash-lite",
+    "gemini 3 flash": "gemini-3-flash",
+    "gemini 2.5 pro": "gemini-2.5-pro",
+    "claude opus 5.5 (high)": "claude-opus-5-5-high",
+    "claude opus 5.5 (medium)": "claude-opus-5-5-medium",
+    "claude opus 5.5 (low)": "claude-opus-5-5-low",
+    "claude sonnet 5.5 (high)": "claude-sonnet-5-5-high",
+    "claude sonnet 5.5 (medium)": "claude-sonnet-5-5-medium",
+    "claude sonnet 5.5 (low)": "claude-sonnet-5-5-low",
+    "gpt-oss 120b (medium)": "gpt-oss-120b-medium",
+}
+
+
+def normalize_agy_model(raw: str, default: str = "gemini-4-argon-high") -> str:
+    """Normalize an Antigravity display or slug model name to its canonical catalog ID."""
+    if not raw or not str(raw).strip():
+        return default
+    s = str(raw).strip()
+    low = s.lower()
+    if low in AGY_MODEL_MAP:
+        return AGY_MODEL_MAP[low]
+    tier_match = re.match(r"^(.*?)\s*\(([^()]+)\)$", low)
+    if tier_match:
+        base_slug = re.sub(r"[^a-z0-9._-]+", "-", tier_match.group(1)).strip("-")
+        tier_slug = re.sub(r"[^a-z0-9._-]+", "-", tier_match.group(2)).strip("-")
+        tiered = f"{base_slug}-{tier_slug}" if base_slug and tier_slug else ""
+        if tiered and (
+            tiered in DEFAULT_PRICES
+            or (base_slug.startswith("gemini-") and tier_slug in ("low", "medium", "high", "xhigh", "max"))
+        ):
+            return tiered
+    display_name = re.sub(r"\s*\([^()]*\)$", "", low).replace(" ", "-")
+    if display_name in DEFAULT_PRICES and display_name.startswith("gemini-"):
+        return display_name
+    if ID_RE.fullmatch(s):
+        return s
+    if low.startswith("gemini") and "argon" in low:
+        if "low" in low:
+            return "gemini-4-argon-low"
+        if "medium" in low:
+            return "gemini-4-argon-medium"
+        return "gemini-4-argon-high"
+    if low.startswith("gemini") and "flash" in low:
+        if "low" in low:
+            return "gemini-3.8-flash-low"
+        if "high" in low:
+            return "gemini-3.8-flash-high"
+        return "gemini-3.8-flash-medium"
+    if low.startswith("claude") and "opus" in low:
+        return "claude-opus-5-5"
+    if low.startswith("claude") and "sonnet" in low:
+        if "high" in low:
+            return "claude-sonnet-5-5-high"
+        if "low" in low:
+            return "claude-sonnet-5-5-low"
+        return "claude-sonnet-5-5-medium"
+    if low.startswith("claude") and "haiku" in low:
+        return "claude-haiku-4-5"
+    if "gpt-oss" in low:
+        return "gpt-oss-120b-medium"
+    return re.sub(r"[^a-z0-9._-]+", "-", low).strip("-")
 
 
 def logged_model(record):

@@ -1,6 +1,6 @@
 {
   "name": "quotacanvas-web",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "scripts": {"build": "node web/build.cjs"},
   "dependencies": {"react": "19.3.1", "react-dom": "19.3.1"},

@@ -4,7 +4,7 @@
 
 在瀏覽器查看 Codex、Antigravity、Claude Code 和 DeepSeek Harness 的本機 AI 用量。支援的 Agent 還可顯示額度、讀取對話和排程發送訊息。
 
-**v0.0.1 · Linux / Windows x64 · [MIT 授權](LICENSE)**
+**v0.0.2 · Linux / Windows x64 · [MIT 授權](LICENSE)**
 
 ![QuotaCanvas 用量總覽（示範資料）](docs/demo-overview-en.png)
 
@@ -12,7 +12,7 @@
 
 ### Windows（x64）
 
-1. 在 GitHub **Releases** 下載 `QuotaCanvas-v0.0.1-windows-x64.zip`，解壓整個資料夾。
+1. 在 GitHub **Releases** 下載 `QuotaCanvas-v0.0.2-windows-x64.zip`，解壓整個資料夾。
 2. 雙擊 `QuotaCanvas.exe`。首次啟動會要求設定面板密碼，無需安裝 Python。
 3. 點「打开本机面板」，或在瀏覽器開啟 [http://127.0.0.1:8088](http://127.0.0.1:8088)。關閉主視窗會停止服務。
 
@@ -42,6 +42,8 @@ python server.py
 - **查價**可使用本機 Agent 查詢或排程查詢。也可複製面板上的提示詞給其他 AI，再匯入回傳的 JSON。核對來源後按「應用建議」即可生效。
 - **本機對話**可讀取、建立和延續支援的對話，並排程發送。Codex 的原生提問會在對話下方顯示。輸入 `/help` 查看目前 Agent 支援的指令。
 - **設定**可查看已完成任務的平均 tok/s 和額度耗盡紀錄，也可隱藏郵箱、設定訂閱日期及限制登入失敗次數。
+
+預設價格來自專案中的 `model_prices.json`。手動價格與查價建議存放在 `data/prices.json`。可按供應商縮小查價範圍。開啟定時查價後，價格頁會顯示下次檢查時間，結果需確認後套用。官方已公布的內建費率依用量時間及 UTC 生效日期計算，手動價格優先。
 
 ## Linux 命令參考
 

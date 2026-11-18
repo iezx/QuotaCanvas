@@ -83,7 +83,7 @@ function AnimatedTokens({ value: e }) {
   }, [e]), (0, jsxRuntime.jsx)(`span`, { className: `font-mono text-2xl font-medium tracking-tight tabular-nums`, "aria-label": `Tokens 总数 ${rd(e)}`, children: rd(t) });
 }
 function Brand() {
-  return jsxRuntime.jsxs('h1', {className: 'qc-brand', children: ['QuotaCanvas', jsxRuntime.jsx('span', {className: 'qc-version', children: 'v0.0.1'})]});
+  return jsxRuntime.jsxs('h1', {className: 'qc-brand', children: ['QuotaCanvas', jsxRuntime.jsx('span', {className: 'qc-version', children: 'v0.0.2'})]});
 }
 function Overview() {
   let { stats: e, loading, reload } = useStats(), [t, n] = useStoredValue(`ai-usage.metric`, `tok`), [r, i] = useStoredValue(`ai-usage.source`, `all`);
@@ -99,18 +99,18 @@ function Overview() {
         (0, jsxRuntime.jsx)(AnimatedTokens, { value: totalTok }),
         (0, jsxRuntime.jsxs)(`span`, { className: `font-mono text-sm text-muted-foreground tabular-nums`, children: [`≈ API `, nd(totalCost)] })
       ] }),
-      (0, jsxRuntime.jsxs)(`div`, { className: `flex flex-wrap items-center gap-3 text-xs text-muted-foreground`, children: [
+      (0, jsxRuntime.jsxs)(`nav`, { className: `flex flex-wrap items-center gap-2 text-xs text-muted-foreground`, "aria-label": QCtext(`页面导航`), children: [
         (0, jsxRuntime.jsx)(`button`, { type: `button`, onClick: () => {
           try {
             localStorage.setItem(`quotacanvas.language`, window.QCi18n.english ? `zh` : `en`);
           } catch {
           }
           location.reload();
-        }, className: `inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground`, children: window.QCi18n.english ? `中文` : `English` }),
-        (0, jsxRuntime.jsx)(`a`, { href: `/live.html`, className: `inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground`, title: `额度预计 · 对话与定时发送 · API 标价`, children: `额度预计 · 对话定时 →` }),
-        (0, jsxRuntime.jsx)(`a`, { href: `/pricing.html`, className: `inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground`, children: QCtext(`模型与价格`) }),
-        (0, jsxRuntime.jsx)(`a`, { href: `/settings.html`, className: `inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground`, title: `Cloudflare Tunnel + Access 远程访问设置`, children: `设置` }),
-        (0, jsxRuntime.jsxs)(`button`, { type: `button`, onClick: reload, className: `inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground`, title: `点击立即重新扫描日志并刷新`, children: [
+        }, className: `inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground whitespace-nowrap transition-colors`, children: window.QCi18n.english ? `中文` : `English` }),
+        (0, jsxRuntime.jsx)(`a`, { href: `/live.html`, className: `inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground whitespace-nowrap transition-colors`, title: `额度预计 · 对话定时发送`, children: `额度预计 · 对话定时 →` }),
+        (0, jsxRuntime.jsx)(`a`, { href: `/pricing.html`, className: `inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground whitespace-nowrap transition-colors`, children: QCtext(`模型与价格`) }),
+        (0, jsxRuntime.jsx)(`a`, { href: `/settings.html`, className: `inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground whitespace-nowrap transition-colors`, title: `Cloudflare Tunnel + Access 远程访问设置`, children: `设置` }),
+        (0, jsxRuntime.jsxs)(`button`, { type: `button`, onClick: reload, className: `inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground whitespace-nowrap transition-colors`, title: `点击立即重新扫描日志并刷新`, children: [
           (0, jsxRuntime.jsx)(`span`, { className: `size-1.5 rounded-full`, style: { background: loading ? `#d4a72c` : `#10a37f` } }),
           loading ? `刷新中…` : `每分钟自动更新 · ${genTime}`
         ] }),
@@ -313,7 +313,7 @@ function Qd({ stats: e, srcs: t }) {
 function SourceFilter({ sources, value, onChange }) {
   return jsxRuntime.jsx("select", {
     "aria-label": QCtext("来源"),
-    className: "w-44 rounded-md border bg-background px-2.5 py-1 text-xs text-foreground",
+    className: "w-44 h-7 rounded-md border bg-background px-2.5 py-1 text-xs text-foreground",
     value,
     onChange: (event) => onChange(event.target.value),
     children: [
@@ -426,14 +426,39 @@ function Ed({ stats: e, srcs }) {
   return (0, jsxRuntime.jsxs)(`section`, { "aria-label": `订阅`, className: `mt-16 grid grid-cols-[minmax(0,1fr)] items-center gap-10 min-[900px]:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]`, children: [(0, jsxRuntime.jsx)(bd, { label: `订阅回报`, value: wd(o / s), sub: `API 等价 ${nd(o)} · 已付 ${nd(s)}`, color: vd }), (0, jsxRuntime.jsxs)(`div`, { className: `flex flex-col gap-2`, children: [(0, jsxRuntime.jsxs)(`div`, { ref: r, className: `relative`, onMouseLeave: () => a(null), children: [(0, jsxRuntime.jsxs)(`div`, { ref: n, className: `overflow-x-auto`, children: [(0, jsxRuntime.jsx)(`div`, { className: `flex h-52 gap-2 border-b`, style: { minWidth: `${c.length * 4.25}rem` }, children: c.map((t2, n2) => (0, jsxRuntime.jsxs)(`div`, { onMouseEnter: (e2) => f(n2, e2.currentTarget), onClick: (e2) => f(n2, e2.currentTarget), className: `relative h-full min-w-15 flex-1 ${i?.i === n2 ? `bg-muted/60` : ``}`, children: [(0, jsxRuntime.jsx)(`div`, { className: `absolute bottom-0 left-1/2 w-[60%] max-w-10 -translate-x-1/2 rounded-t-[2px]`, style: { height: d(t2.cost), background: t2.ongoing ? `repeating-linear-gradient(135deg, ${e.sources[t2.source].color} 0 2px, transparent 2px 5px)` : e.sources[t2.source].color } }), (0, jsxRuntime.jsx)(`div`, { className: `absolute inset-x-0 border-t-2 border-dashed`, style: { bottom: d(t2.price), borderColor: vd } }), (0, jsxRuntime.jsxs)(`div`, { className: `absolute inset-x-0 flex flex-col items-center tabular-nums`, style: { bottom: `calc(${d(t2.cost)} + 6px)` }, children: [(0, jsxRuntime.jsx)(`span`, { className: `font-mono text-base font-medium`, children: wd(t2.cost / t2.price) }), (0, jsxRuntime.jsxs)(`span`, { className: `text-[11px] text-muted-foreground`, children: [`$`, Math.round(t2.cost).toLocaleString(`en-US`)] })] })] }, t2.from + t2.source)) }), (0, jsxRuntime.jsx)(`div`, { className: `mt-2 flex gap-2 text-[11px] text-muted-foreground/70`, style: { minWidth: `${c.length * 4.25}rem` }, children: c.map((e2) => (0, jsxRuntime.jsxs)(`span`, { className: `min-w-15 flex-1 text-center whitespace-nowrap`, children: [Td(e2.from), `–`, Td(e2.to), e2.ongoing && (0, jsxRuntime.jsx)(`span`, { className: `block`, children: `${e2.name} 进行中` })] }, e2.from + e2.source)) })] }), p && (0, jsxRuntime.jsxs)(`div`, { className: `pointer-events-none absolute z-50 flex w-52 flex-col gap-1.5 rounded-[10px] border bg-popover px-3 py-2.5 text-xs text-popover-foreground shadow-[0_12px_32px_-12px_rgb(0_0_0/0.25)]`, style: { left: `clamp(6rem, ${i.x}px, calc(100% - 6rem))`, top: i.y, transform: `translate(-50%, -100%)` }, children: [(0, jsxRuntime.jsxs)(`div`, { className: `flex justify-between gap-4`, children: [(0, jsxRuntime.jsxs)(`span`, { className: `font-semibold`, children: [p.name, p.ongoing && `（进行中）`] }), (0, jsxRuntime.jsxs)(`span`, { className: `text-muted-foreground`, children: [Td(p.from), `–`, Td(p.to)] })] }), (0, jsxRuntime.jsx)(`span`, { className: `font-mono text-base font-medium`, children: wd(p.cost / p.price) }), (0, jsxRuntime.jsxs)(`div`, { className: `flex justify-between gap-4 tabular-nums`, children: [(0, jsxRuntime.jsx)(`span`, { children: `API 等价` }), (0, jsxRuntime.jsx)(`span`, { children: nd(p.cost) })] }), (0, jsxRuntime.jsxs)(`div`, { className: `flex justify-between gap-4 tabular-nums`, children: [(0, jsxRuntime.jsx)(`span`, { children: `订阅` }), (0, jsxRuntime.jsx)(`span`, { children: nd(p.price) })] })] })] }), (0, jsxRuntime.jsxs)(`div`, { className: `mt-1 flex items-center justify-end gap-2 text-[11px] text-muted-foreground/70`, children: [(0, jsxRuntime.jsx)(`span`, { className: `w-5 border-t-2 border-dashed`, style: { borderColor: vd } }), [...new Set(c.map((e2) => `${e2.name} $${e2.price}/月`))].join(` · `)] })] })] });
 }
 function Dd({ stats: e, metric: t, onMetric: n, srcs: r }) {
-  let [modelSort, setModelSort] = useStoredValue(`ai-usage.model-sort`, `tok`), costSort = modelSort === `cost`;
-  let i = e.summary.models.filter((e2) => r.includes(e2[2])).sort((a2, b) => costSort ? (b[3] ?? 0) - (a2[3] ?? 0) : b[1] - a2[1]), a = i.reduce((total, m) => total + (costSort ? m[3] ?? 0 : m[1]), 0), o = (() => {
-    let top = new Set(i.slice(0, Md).map((x) => x[0] + x[2]));
-    for (let sc of r) {
-      i.filter((x) => x[2] === sc).slice(0, 4).forEach((x) => top.add(x[0] + x[2]));
+  let [modelSort, setModelSort] = useStoredValue(`ai-usage.model-sort`, `tok`), [showAllModels, setShowAllModels] = (0, React.useState)(false);
+  let lastDay = /* @__PURE__ */ new Map();
+  for (let day of e.days ?? []) {
+    for (let entry of day.m ?? []) {
+      let key = entry[0] + entry[2], prev = lastDay.get(key);
+      if (!prev || day.d > prev) lastDay.set(key, day.d);
     }
-    return i.filter((x) => top.has(x[0] + x[2]));
-  })().map(([t2, n2, r2, mCost]) => ({ key: t2 + r2, label: t2 === `unknown` ? (window.QCi18n?.text(`日志未提供模型`) ?? `日志未提供模型`) : t2, title: e.sources[r2]?.name ? `${e.sources[r2].name} · ${t2}` : t2, value: costSort ? mCost ?? 0 : n2, text: td(n2), note: mCost != null ? `${nd(mCost)} · ${jd((costSort ? mCost : n2) / Math.max(a, 1e-9))}` : (window.QCi18n?.text(`待定价`) ?? `待定价`), color: e.sources[r2]?.color })), s = /* @__PURE__ */ new Map();
+  }
+  let recentCutoff = e.today ? Zu(Qu(e.today) - 13 * Wu) : ``;
+  let i = e.summary.models.filter((e2) => r.includes(e2[2])).sort((a2, b) => {
+    if (modelSort === `cost`) return (b[3] ?? 0) - (a2[3] ?? 0) || b[1] - a2[1];
+    if (modelSort === `recent`) {
+      let cmp = (lastDay.get(b[0] + b[2]) ?? ``).localeCompare(lastDay.get(a2[0] + a2[2]) ?? ``);
+      return cmp || b[1] - a2[1];
+    }
+    return b[1] - a2[1];
+  }), a = i.reduce((total, m) => total + (modelSort === `cost` ? m[3] ?? 0 : m[1]), 0), o = (() => {
+    let picked = i;
+    if (!showAllModels) {
+      let top = new Set(i.slice(0, Md).map((x) => x[0] + x[2]));
+      for (let sc of r) {
+        i.filter((x) => x[2] === sc).slice(0, 6).forEach((x) => top.add(x[0] + x[2]));
+      }
+      if (recentCutoff) {
+        for (let x of i) if ((lastDay.get(x[0] + x[2]) ?? ``) >= recentCutoff) top.add(x[0] + x[2]);
+      }
+      picked = i.filter((x) => top.has(x[0] + x[2]));
+    }
+    return picked.map(([t2, n2, r2, mCost]) => {
+      let ld = lastDay.get(t2 + r2);
+      return { key: t2 + r2, label: t2 === `unknown` ? (window.QCi18n?.text(`日志未提供模型`) ?? `日志未提供模型`) : t2, title: `${e.sources[r2]?.name ? `${e.sources[r2].name} · ${t2}` : t2}${ld ? ` · ${ld}` : ``}`, value: modelSort === `cost` ? mCost ?? 0 : n2, text: td(n2), note: mCost != null ? `${nd(mCost)} · ${jd((modelSort === `cost` ? mCost : n2) / Math.max(a, 1e-9))}` : (window.QCi18n?.text(`待定价`) ?? `待定价`), color: e.sources[r2]?.color };
+    });
+  })(), canToggleModels = showAllModels || o.length < i.length, s = /* @__PURE__ */ new Map();
   for (let [t2, n2, i2] of e.summary.tools) r.includes(i2) && s.set(t2, (s.get(t2) ?? 0) + n2);
   let c = [...s].sort((e2, t2) => t2[1] - e2[1]), l = c.reduce((e2, t2) => e2 + t2[1], 0), u = c.slice(0, Md).map(([e2, t2]) => ({ key: e2, label: e2, value: t2, text: rd(t2), note: jd(t2 / l) })), d = e.days[0] ? Qu(e.days[0].d) : Qu(e.today), f = new Map(e.days.map((e2) => [e2.d, e2])), p = [];
   for (let n2 = d; n2 <= Qu(e.today); n2 += Wu) {
@@ -443,7 +468,7 @@ function Dd({ stats: e, metric: t, onMetric: n, srcs: r }) {
     });
     p.push({ d: e2, parts: i2, sum: i2.reduce((e3, t2) => e3 + t2[1], 0) });
   }
-  return (0, jsxRuntime.jsxs)(jsxRuntime.Fragment, { children: [(0, jsxRuntime.jsx)(Pd, { title: `每日${Ku[t]}`, right: (0, jsxRuntime.jsx)(MetricPicker, { label: `度量`, value: t, onChange: (e2) => n(e2), items: Object.keys(Ku).map((e2) => ({ value: e2, label: Ku[e2] })) }), children: (0, jsxRuntime.jsx)(Ad, { stats: e, metric: t, bars: p }) }), (0, jsxRuntime.jsxs)(`div`, { className: `mt-16 ${Nd}`, children: [(0, jsxRuntime.jsx)(`section`, { "aria-label": `模型`, children: (0, jsxRuntime.jsxs)(jsxRuntime.Fragment, { children: [(0, jsxRuntime.jsxs)(`label`, { className: `mb-2 flex items-center justify-end gap-2 text-xs text-muted-foreground`, children: [QCtext(`排序`), (0, jsxRuntime.jsxs)(`select`, { id: `model-sort`, "aria-label": QCtext(`模型排序`), className: `rounded-md border bg-background px-2 py-1 text-foreground`, value: costSort ? `cost` : `tok`, onChange: (event) => setModelSort(event.target.value), children: [(0, jsxRuntime.jsx)(`option`, { value: `tok`, children: QCtext(`按 Tokens 排序`) }), (0, jsxRuntime.jsx)(`option`, { value: `cost`, children: QCtext(`按费用排序`) })] })] }), (0, jsxRuntime.jsx)(Id, { items: o, head: [QCtext(`模型`), `Tokens`, QCtext(`费用 / 占比`)] })] }) }), (0, jsxRuntime.jsx)(`section`, { "aria-label": `工具`, children: (0, jsxRuntime.jsx)(Id, { items: u, head: [`工具`, `次数`, `占比`] }) })] })] });
+  return (0, jsxRuntime.jsxs)(jsxRuntime.Fragment, { children: [(0, jsxRuntime.jsx)(Pd, { title: `每日${Ku[t]}`, right: (0, jsxRuntime.jsx)(MetricPicker, { label: `度量`, value: t, onChange: (e2) => n(e2), items: Object.keys(Ku).map((e2) => ({ value: e2, label: Ku[e2] })) }), children: (0, jsxRuntime.jsx)(Ad, { stats: e, metric: t, bars: p }) }), (0, jsxRuntime.jsxs)(`div`, { className: `mt-16 ${Nd}`, children: [(0, jsxRuntime.jsx)(`section`, { "aria-label": `模型`, children: (0, jsxRuntime.jsxs)(jsxRuntime.Fragment, { children: [(0, jsxRuntime.jsxs)(`div`, { className: `mb-2 flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground`, children: [canToggleModels && (0, jsxRuntime.jsx)(`button`, { type: `button`, id: `model-toggle-all`, className: `rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors`, onClick: () => setShowAllModels((v) => !v), children: showAllModels ? QCtext(`仅看近期与常用`) : `${QCtext(`显示全部模型`)} (${i.length})` }), (0, jsxRuntime.jsxs)(`label`, { className: `flex items-center gap-2`, children: [QCtext(`排序`), (0, jsxRuntime.jsxs)(`select`, { id: `model-sort`, "aria-label": QCtext(`模型排序`), className: `rounded-md border bg-background px-2 py-1 text-foreground`, value: modelSort === `cost` || modelSort === `recent` ? modelSort : `tok`, onChange: (event) => setModelSort(event.target.value), children: [(0, jsxRuntime.jsx)(`option`, { value: `tok`, children: QCtext(`按 Tokens 排序`) }), (0, jsxRuntime.jsx)(`option`, { value: `cost`, children: QCtext(`按费用排序`) }), (0, jsxRuntime.jsx)(`option`, { value: `recent`, children: QCtext(`按最近使用排序`) })] })] })] }), (0, jsxRuntime.jsx)(Id, { items: o, head: [QCtext(`模型`), `Tokens`, QCtext(`费用 / 占比`)] })] }) }), (0, jsxRuntime.jsx)(`section`, { "aria-label": `工具`, children: (0, jsxRuntime.jsx)(Id, { items: u, head: [`工具`, `次数`, `占比`] }) })] })] });
 }
 function Od(e) {
   let t = 10 ** Math.floor(Math.log10(e));

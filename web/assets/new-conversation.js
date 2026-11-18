@@ -3,7 +3,7 @@
   const dialog=document.createElement('dialog');dialog.className='site-dialog';dialog.id='new-conversation-dialog';
   dialog.innerHTML=`<form id="new-conversation-form"><h2>${T('新建本机对话','New local conversation')}</h2>
     <label for="new-source">${T('来源','Source')}</label><select id="new-source"><option value="codex">Codex</option><option value="agy">Antigravity</option><option value="cc">Claude Code</option></select>
-    <label for="new-cwd">${T('项目目录（本机绝对路径）','Project directory (absolute local path)')}</label><input id="new-cwd" required autocomplete="off" placeholder="/path/to/project">
+    <label for="new-cwd">${T('项目目录（本机绝对路径）','Project directory (absolute local path)')}</label><input id="new-cwd" list="new-cwd-list" required autocomplete="off" placeholder="/path/to/project"><datalist id="new-cwd-list"></datalist>
     <label for="new-model">${T('模型（留空使用默认）','Model (blank for default)')}</label><input id="new-model" list="new-model-list"><datalist id="new-model-list"></datalist>
     <label for="new-effort">${T('思考强度','Reasoning effort')}</label><select id="new-effort"><option value="">${T('默认','Default')}</option>${['low','medium','high','xhigh','max','ultra'].map(x=>`<option value="${x}">${x}</option>`).join('')}</select>
     <label for="new-prompt">${T('第一条消息','First message')}</label><textarea id="new-prompt" required rows="4" maxlength="40000" style="width:100%"></textarea>
@@ -15,8 +15,9 @@
     if($('new-effort').selectedOptions[0]?.hidden)$('new-effort').value='';
   }
   $('new-model').oninput=syncEfforts;$('new-model').onchange=syncEfforts;document.addEventListener('qc-model-catalog',syncEfforts);
-  function modelChoices(){const list=$('new-model-list');list.replaceChildren(...(MODELS_BY_SRC[$('new-source').value]||[]).map(id=>{const option=document.createElement('option');option.value=id;return option}));syncEfforts()}
-  $('new-conversation').onclick=()=>{const current=convs[$('conv').value];$('new-source').value=current?.source||($('src').value==='all'?'codex':$('src').value);$('new-cwd').value=current?.cwd||'';$('new-model').value=getSelModel();$('new-effort').value=$('effort').value;$('new-conversation-error').textContent='';modelChoices();dialog.showModal();$('new-cwd').focus()};
+  function cwdChoices(){const list=$('new-cwd-list');if(!list)return;const seen=new Set();const opts=[];for(const c of convs){if(!c?.cwd||seen.has(c.cwd))continue;seen.add(c.cwd);const o=document.createElement('option');o.value=c.cwd;opts.push(o)}list.replaceChildren(...opts)}
+  function modelChoices(){const list=$('new-model-list'),src=$('new-source').value,ids=[...new Set([...(MODELS_BY_SRC[src]||[]),...(window.QCModelCatalog?.[src]||[]).map(m=>m.model||m.id).filter(Boolean)])];list.replaceChildren(...ids.map(id=>{const option=document.createElement('option');option.value=id;return option}));syncEfforts()}
+  $('new-conversation').onclick=()=>{const current=convs[$('conv').value];$('new-source').value=current?.source||($('src').value==='all'?'codex':$('src').value);$('new-cwd').value=current?.cwd||convs[0]?.cwd||'';$('new-model').value=getSelModel();$('new-effort').value=$('effort').value;$('new-conversation-error').textContent='';cwdChoices();modelChoices();dialog.showModal();$('new-cwd').focus()};
   $('new-source').onchange=()=>{$('new-model').value='';modelChoices()};
   $('new-conversation-cancel').onclick=()=>dialog.close();
   $('new-conversation-form').onsubmit=async event=>{event.preventDefault();$('new-conversation-submit').disabled=true;

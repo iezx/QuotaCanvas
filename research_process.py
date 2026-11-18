@@ -11,7 +11,7 @@ import time
 def run_research_process(command, cwd, on_event, timeout=240):
     events = queue.Queue(maxsize=16)
     stopped = threading.Event()
-    process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    process = subprocess.Popen(command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                start_new_session=os.name != 'nt', bufsize=0,
                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 

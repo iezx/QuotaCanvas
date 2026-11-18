@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -27,7 +28,7 @@ AGY_HOME = Path(
 ).expanduser()
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_HOME", str(Path.home() / ".claude"))).expanduser()
 
-AGY_BASE = os.environ.get("CLOUD_CODE_URL", "https://cloudcode-pa.googleapis.com")
+AGY_BASE = os.environ.get("CLOUD_CODE_URL", "https://daily-cloudcode-pa.googleapis.com")
 AGY_UA = (
     "antigravity/cli/1.4.12 (aidev_client; os_type=linux; arch=amd64; "
     "cl=1010700967; auth_method=consumer)"
@@ -36,8 +37,7 @@ AGY_UA = (
 _cache: dict[str, tuple[float, Any]] = {}
 CACHE_TTL = 45  # seconds
 
-# Reference full-quota API dollar equivalents when local window spend is <1%
-# (calibrated from measured logs & official plan tiers)
+# Reference API-equivalent values for known windows with limited local data.
 DEFAULT_FULL_QUOTA_USD: dict[str, float] = {
     "codex:primary": 30.46,
     "codex:secondary": 190.40,
@@ -322,72 +322,63 @@ def fetch_claude_live() -> dict[str, Any] | None:
     return out
 
 
+def _used_percent(value: float | None) -> float | None:
+    if value is None or not math.isfinite(value):
+        return None
+    return min(100.0, max(0.0, float(value)))
+
+
 def forecast_window(
     used_pct: float | None,
     window_min: int | None,
     resets_at: float | None,
     now: float | None = None,
 ) -> dict[str, Any] | None:
-    """
-    Calculate clear, intuitive quota pace metrics:
-    - elapsed time & remaining time until reset
-    - average burn rate (%/h) and remaining safe allowance (%/h or %/day)
-    - estimated remaining续航 time at current average pace
-    """
-    now = now or time.time()
-    if used_pct is None or not window_min or not resets_at:
+    used = _used_percent(used_pct)
+    if used is None or not window_min or window_min <= 0 or not resets_at or not math.isfinite(resets_at):
         return None
-    total = float(window_min * 60)
-    left = max(0.0, float(resets_at) - now)
+
+    now = time.time() if now is None else now
+    left = resets_at - now
     if left <= 0:
-        return {"status": "reset", "projected_used_percent": 0.0, "left_seconds": 0}
+        return {"status": "reset", "left_seconds": 0, "window_minutes": window_min}
 
-    # Elapsed time in current window (at least 30m for 5h, 4h for weekly to prevent spike distortion)
-    min_elapsed = 1800.0 if window_min <= 360 else 14400.0
-    raw_elapsed = max(60.0, total - left)
-    elapsed = max(min_elapsed, raw_elapsed)
-
-    rem_pct = max(0.0, 100.0 - float(used_pct))
-    rate_per_sec = float(used_pct) / elapsed
-    rate_per_hr = rate_per_sec * 3600.0
-    projected = min(100.0, float(used_pct) + rate_per_sec * left)
-    projected_raw = float(used_pct) + rate_per_sec * left
-
-    # Safe allowance rate to comfortably last until reset
-    safe_pct_per_hr = rem_pct / max(left / 3600.0, 0.1)
-    safe_pct_per_day = rem_pct / max(left / 86400.0, 0.1)
-
-    res: dict[str, Any] = {
+    elapsed = max(0.0, window_min * 60 - left)
+    remaining = 100.0 - used
+    result = {
         "window_minutes": window_min,
         "left_seconds": int(left),
-        "elapsed_seconds": int(raw_elapsed),
-        "burn_percent_per_hour": round(rate_per_hr, 2),
-        "safe_percent_per_hour": round(safe_pct_per_hr, 2),
-        "safe_percent_per_day": round(min(100.0, safe_pct_per_day), 1),
-        "projected_used_percent": round(projected, 1),
-        "projected_raw_percent": round(projected_raw, 1),
-        "will_exhaust": bool(used_pct >= 100 or projected_raw >= 105),
+        "elapsed_seconds": int(elapsed),
+        "safe_percent_per_hour": round(remaining * 3600 / left, 2) if left >= 3600 else None,
+        "safe_percent_per_day": round(remaining * 86400 / left, 1) if left >= 86400 else None,
+        "projected_used_percent": None,
+        "will_exhaust": used == 100,
+        "support_seconds": None,
+        "exhausts_at": None,
     }
+    if used == 100:
+        result.update(status="exhausted", support_seconds=0, projected_used_percent=100.0)
+        return result
 
-    if used_pct >= 100:
-        res["status"] = "exhausted"
-        res["support_seconds"] = 0
-        res["exhausts_at"] = None
-    elif rate_per_sec > 0:
-        support_sec = rem_pct / rate_per_sec
-        res["support_seconds"] = int(support_sec)
-        eta = now + support_sec
-        if eta < resets_at and projected_raw >= 105:
-            res["status"] = "will_exhaust"
-            res["exhausts_at"] = int(eta)
-        else:
-            res["status"] = "safe"
-            res["exhausts_at"] = None
-    else:
-        res["status"] = "safe"
-        res["support_seconds"] = int(left)
-        res["exhausts_at"] = None
-    return res
+    min_elapsed = 1800 if window_min <= 360 else 14400
+    if elapsed < min_elapsed:
+        result["status"] = "early"
+        return result
+
+    rate = used / elapsed
+    projected = used + rate * left
+    support = remaining / rate if rate > 0 else None
+    will_exhaust = support is not None and support < left
+    result.update(
+        status="will_exhaust" if will_exhaust else "safe",
+        burn_percent_per_hour=round(rate * 3600, 2),
+        projected_used_percent=round(min(100.0, projected), 1),
+        projected_raw_percent=round(projected, 1),
+        will_exhaust=will_exhaust,
+        support_seconds=int(support) if support is not None else None,
+        exhausts_at=int(now + support) if will_exhaust else None,
+    )
+    return result
 
 
 def attach_cost(
@@ -397,71 +388,147 @@ def attach_cost(
     pick=None,
     default_key: str = "",
 ) -> None:
-    """
-    Calculate API dollar equivalents for a 5h or Weekly quota window:
-    - cost_used: actual API equivalent USD spent in this window
-    - cost_quota_total: estimated 100% full quota value in API USD
-    - cost_remaining: remaining quota value in API USD
-    - cost_safe_rate: how much API USD you can spend per hour (for 5h) or per day (for weekly) until reset
-    """
-    used = float(win.get("used_percent") or 0.0)
-    rem = max(0.0, 100.0 - used)
-    ra = win.get("resets_at")
+    """Sum priced log activity in the provider's actual window and estimate capacity."""
+    reset = win.get("resets_at")
     now = time.time()
-    left = max(0.0, (float(ra) - now) if ra else float(window_minutes * 60))
-
-    t0 = (float(ra) - window_minutes * 60) if ra else (now - window_minutes * 60)
-    selected = [e for e in events if t0 <= e[0] <= now and (not ra or e[0] < float(ra))
-                and (pick is None or pick(e[1]))]
     models = {}
-    for event in selected:
-        model = models.setdefault(event[1], {'model': event[1], 'tokens': 0, 'requests': 0, 'cost': 0.0})
-        model['tokens'] += event[-3]
-        model['requests'] += event[-2]
-        model['cost'] += event[-1]
+    if reset and math.isfinite(reset) and window_minutes > 0:
+        start = reset - window_minutes * 60
+        for event in events:
+            if not (start <= event[0] < reset and event[0] <= now):
+                continue
+            if pick is not None and not pick(event[1]):
+                continue
+            model = models.setdefault(event[1], {'model': event[1], 'tokens': 0, 'requests': 0, 'cost': 0.0})
+            model['tokens'] += event[-3]
+            model['requests'] += event[-2]
+            model['cost'] += event[-1]
+
     spent = sum(model['cost'] for model in models.values())
-    win['cost_observed'] = round(spent, 6) if selected else None
+    win['cost_observed'] = round(spent, 6) if spent > 0 else None
     win['cost_models'] = sorted(({**model, 'cost': round(model['cost'], 6)} for model in models.values()),
                                 key=lambda model: (-model['cost'], model['model']))
+    estimate_cost(win, window_minutes, default_key, now=now)
 
-    fallback_full = DEFAULT_FULL_QUOTA_USD.get(default_key, 20.0)
-    if used >= 5.0 and spent >= 0.20:
-        full_usd = spent / (used / 100.0)
-        is_estimated_baseline = False
-    else:
-        full_usd = fallback_full
-        if spent <= 0.01 and used > 0:
-            spent = full_usd * (used / 100.0)
-        is_estimated_baseline = True
 
-    rem_usd = max(0.0, full_usd * (rem / 100.0))
-    used_usd = full_usd * (used / 100.0) if is_estimated_baseline else spent
+def estimate_cost(win, window_minutes, default_key, *, now=None):
+    """Estimate capacity from the quota percentage and the same window's log costs."""
+    used = _used_percent(win.get('used_percent'))
+    spent = win.get('cost_observed')
+    reset = win.get('resets_at')
+    now = time.time() if now is None else now
+    left = reset - now if reset and math.isfinite(reset) else 0
+    win.pop('cost_safe_per_day', None)
+    win.pop('cost_safe_per_hour', None)
 
-    win["cost_used"] = round(used_usd, 2)
-    win['cost_is_estimated'] = is_estimated_baseline
-    win["cost_quota_total"] = round(full_usd, 2)
-    win["cost_remaining"] = round(rem_usd, 2)
+    full = remaining = None
+    uses_reference = False
+    if used == 100 and spent is not None:
+        full = spent
+    elif used is not None and left > 0:
+        # The same Codex slot can carry different durations on different plans.
+        if default_key.startswith('codex:'):
+            default_key = {300: 'codex:primary', 10080: 'codex:secondary'}.get(window_minutes, '')
+        reference = DEFAULT_FULL_QUOTA_USD.get(default_key)
+        if spent is not None and used >= 25:
+            full = spent * 100 / used
+        elif reference is not None:
+            full = reference
+            if spent is not None and used > 0:
+                # Very small reported percentages are sensitive to rounding and lag.
+                sample_weight = min(1.0, used / 5)
+                reference_weight = 15 * (1 - used / 25)
+                full = (spent * 100 * sample_weight + reference * reference_weight) / (
+                    used * sample_weight + reference_weight
+                )
+            uses_reference = True
+        if full is not None:
+            full = max(full, spent or 0.0)
 
-    is_weekly = window_minutes > 360
-    win_label = "周度满额" if is_weekly else "5h 满额"
-    if left > 0 and rem > 0:
-        if is_weekly:
-            days_left = max(left / 86400.0, 0.2)
-            safe_usd_per_day = rem_usd / days_left
-            win["cost_safe_per_day"] = round(safe_usd_per_day, 2)
-            pace_str = f"重置前日均可用 ≈${safe_usd_per_day:,.2f}/天"
+    if full is not None and left > 0:
+        remaining = full * (100 - used) / 100
+        if remaining > 0 and window_minutes > 360 and left >= 86400:
+            win['cost_safe_per_day'] = round(remaining * 86400 / left, 2)
+        elif remaining > 0 and left >= 3600:
+            win['cost_safe_per_hour'] = round(remaining * 3600 / left, 2)
+
+    win['cost_used'] = round(spent, 2) if spent is not None else None
+    win['cost_is_estimated'] = full is None or uses_reference
+    win['cost_quota_total'] = round(full, 2) if full is not None else None
+    win['cost_remaining'] = round(remaining, 2) if remaining is not None else None
+    win['cost_text'] = cost_text(win, window_minutes)
+
+
+def quota_window_minutes(window):
+    return window.get("window_minutes") or {"5h": 300, "weekly": 10080}.get(window.get("window"))
+
+
+def remaining_full_5h_windows(short, weekly, *, now=None):
+    """Count complete windows after the current 5h window, at a similar model mix."""
+    if quota_window_minutes(short) != 300 or quota_window_minutes(weekly) != 10080:
+        return None
+
+    now = time.time() if now is None else now
+    short_reset = short.get("resets_at")
+    week_reset = weekly.get("resets_at")
+    if not (short_reset and week_reset and 0 < short_reset - now <= 18000
+            and 0 < week_reset - now <= 604800):
+        return None
+
+    time_limit = max(0, int((week_reset - short_reset) // 18000))
+    short_used = _used_percent(short.get("used_percent"))
+    week_used = _used_percent(weekly.get("used_percent"))
+    if short_used is None or week_used is None:
+        return None
+    if time_limit == 0 or week_used == 100:
+        return 0
+
+    short_cost = short.get("cost_observed")
+    week_cost = weekly.get("cost_observed")
+    week_start = week_reset - 604800
+    # Wait for at least one 5h period and require some priced usage outside
+    # the current 5h window so one burst cannot calibrate both windows.
+    if (short_used < 5 or week_used < 5 or not short_cost or not week_cost
+            or not 0 < short_cost < week_cost or not math.isfinite(week_cost)
+            or now - week_start < 18000 or short_reset - 18000 < week_start):
+        return None
+
+    short_full = short_cost * 100 / short_used
+    weekly_left = week_cost * (100 - week_used) / week_used
+    current_left = short_full - short_cost
+    quota_limit = max(0, math.floor((weekly_left - current_left) / short_full))
+    return min(quota_limit, time_limit)
+
+
+def add_5h_cycle_forecasts(payload, language):
+    quotas = payload.get("quotas", payload)
+
+    def annotate(windows):
+        short = [w for w in windows if w and quota_window_minutes(w) == 300]
+        weekly = [w for w in windows if w and quota_window_minutes(w) == 10080]
+        if len(short) != 1 or len(weekly) != 1:
+            return
+        week = weekly[0]
+        count = remaining_full_5h_windows(short[0], week)
+        if count is None:
+            return
+        if language == "en":
+            note = f"Est. {count} full 5-hour {'cycle' if count == 1 else 'cycles'} after this one"
         else:
-            hrs_left = max(left / 3600.0, 0.1)
-            safe_usd_per_hr = rem_usd / hrs_left
-            win["cost_safe_per_hour"] = round(safe_usd_per_hr, 2)
-            pace_str = f"重置前均速可用 ≈${safe_usd_per_hr:,.2f}/小时"
-    else:
-        pace_str = "等待重置后恢复额度"
+            note = f"本轮结束后预计还能用满 {count} 轮 5 小时额度"
+        week["remaining_5h_cycles"] = count
+        week["forecast_text"] = " · ".join(filter(None, (week.get("forecast_text"), note)))
 
-    win["cost_text"] = (
-        f"{win_label} ≈${full_usd:,.2f} API · 已用 ≈${used_usd:,.2f} · "
-        f"剩余可用 ≈${rem_usd:,.2f} ({pace_str})"
-    )
+    codex = quotas.get("codex") or {}
+    annotate([codex.get("primary"), codex.get("secondary")])
+
+    agy = quotas.get("agy") or {}
+    for group in (agy.get("live") or agy).get("groups", []):
+        annotate(group.get("buckets", []))
+
+    claude = quotas.get("cc") or {}
+    annotate([w for w in (claude.get("quota") or claude).get("buckets", [])
+              if w.get("bucket_id") in {"five_hour", "seven_day"}])
 
 
 def forecast_text(
@@ -470,71 +537,75 @@ def forecast_text(
     win: dict[str, Any] | None = None,
     language: str = 'zh',
 ) -> str:
-    """Clear, human-friendly forecast explanation without confusing timezone/empty-window wording."""
     if not fc:
         return ""
     now = time.time()
-    left = max(0.0, (resets_at or now) - now)
-    is_weekly = (fc.get("window_minutes") or 300) > 360
+    left = fc.get('left_seconds', max(0.0, (resets_at or now) - now))
+    support = fc.get('support_seconds')
+    projected = fc.get('projected_used_percent')
+    weekly = (fc.get('window_minutes') or 300) > 360
+    unit = 'day' if weekly and fc.get('safe_percent_per_day') is not None else 'hour'
+    safe_pct = fc.get(f'safe_percent_per_{unit}')
+    safe_usd = (win or {}).get(f'cost_safe_per_{unit}')
+    status = fc.get('status')
 
     if language == 'en':
-        if fc.get('status') == 'reset':
+        allowance = f' · Allowance until reset {safe_pct}%/{unit}' if safe_pct is not None else ''
+        if status == 'reset':
             return 'Quota window has reset'
-        if fc.get('status') == 'exhausted':
+        if status == 'exhausted':
             return f'Quota limit reached; resets in {_hm(left, "en")}'
-        support = fc.get('support_seconds') or int(left)
-        projected = fc.get('projected_used_percent', 0)
-        daily = fc.get('safe_percent_per_day', 0)
-        if fc.get('status') == 'will_exhaust':
-            if is_weekly:
-                usd = (win or {}).get('cost_safe_per_day')
-                hint = f' (≈${usd:,.2f}/day)' if usd is not None else ''
-                return f'Usage is high; about {_hm(support, "en")} remaining at this rate. Daily allowance until reset: {daily}%/day{hint}'
-            return f'Usage is high; about {_hm(support, "en")} remaining at this rate (resets in {_hm(left, "en")})'
-        if is_weekly:
-            return f'On track: projected use at reset {projected}%; daily allowance until reset {daily}%/day'
-        return f'On track: projected use at reset {projected}%; {_hm(left, "en")} until reset'
+        if status == 'early':
+            return f'Collecting usage data · Resets in {_hm(left, "en")}{allowance}'
+        if status == 'will_exhaust':
+            usd_hint = f' (≈${safe_usd:,.2f}/{unit})' if safe_usd is not None else ''
+            return f'At the window’s average pace, quota will run out in about {_hm(support or 0, "en")}{allowance}{usd_hint}'
+        return f'Projected use at reset at the window’s average pace {projected}%{allowance}'
 
-    if fc.get("status") == "exhausted":
-        return f"已达 100% 额度上限，将在 {_hm(left)}后自动重置恢复"
-
-    sup = fc.get("support_seconds") or int(left)
-    proj = fc.get("projected_used_percent", 0)
-    safe_day = fc.get("safe_percent_per_day", 0)
-    safe_hr = fc.get("safe_percent_per_hour", 0)
-
-    if fc.get("status") == "will_exhaust":
-        if is_weekly:
-            safe_usd = (win or {}).get("cost_safe_per_day")
-            usd_hint = f"（≈${safe_usd}/天）" if safe_usd else ""
-            return (
-                f"短期消耗较快（按当前速率还可连续支撑约 {_hm(sup)}）；"
-                f"重置前日均可用 {safe_day}%/天{usd_hint}"
-            )
-        else:
-            return f"短期消耗较快，按当前速率还可支撑约 {_hm(sup)}（{_hm(left)}后重置）"
-
-    if is_weekly:
-        return (
-            f"余量充足：预计到重置时累计用掉 {proj}% "
-            f"（重置前日均可用 {safe_day}%/天）"
-        )
-    return f"余量充足：预计到重置时累计用掉 {proj}%（还可支撑 {_hm(left)} 直至重置）"
+    unit_zh = '天' if unit == 'day' else '小时'
+    allowance = f' · 重置前平均可用 {safe_pct}%/{unit_zh}' if safe_pct is not None else ''
+    if status == 'reset':
+        return '额度窗口已重置'
+    if status == 'exhausted':
+        return f'已达额度上限 · {_hm(left)}后重置'
+    if status == 'early':
+        return f'正在收集用量数据 · {_hm(left)}后重置{allowance}'
+    if status == 'will_exhaust':
+        usd_hint = f'（≈${safe_usd:,.2f}/{unit_zh}）' if safe_usd is not None else ''
+        return f'按本窗口平均速度，约 {_hm(support or 0)}后用完{allowance}{usd_hint}'
+    return f'按本窗口平均速度，重置时预计用掉 {projected}%{allowance}'
 
 
 def cost_text(win, window_minutes, language='zh'):
     if 'cost_quota_total' not in win:
         return win.get('cost_text', '') if language != 'en' else ''
-    if language != 'en':
-        return win.get('cost_text', '')
-    label = 'Weekly quota value' if (window_minutes or 300) > 360 else '5h quota value'
-    pace = 'Waiting for quota reset'
-    if win.get('cost_safe_per_day') is not None:
-        pace = f'Average daily allowance until reset ≈${win["cost_safe_per_day"]:,.2f}/day'
-    elif win.get('cost_safe_per_hour') is not None:
-        pace = f'Average hourly allowance until reset ≈${win["cost_safe_per_hour"]:,.2f}/hour'
-    return (f'{label} ≈${win["cost_quota_total"]:,.2f} API · Used ≈${win.get("cost_used", 0):,.2f} · '
-            f'Remaining ≈${win.get("cost_remaining", 0):,.2f} ({pace})')
+
+    full = win.get('cost_quota_total')
+    spent = win.get('cost_used')
+    remaining = win.get('cost_remaining')
+    reference = win.get('cost_is_estimated')
+    en = language == 'en'
+    weekly = (window_minutes or 300) > 360
+    parts = []
+    if full is not None:
+        period = ('Weekly' if weekly else '5h') if en else ('周度' if weekly else '5 小时')
+        quality = ('reference' if reference else 'estimate') if en else ('参考值' if reference else '估算值')
+        label = f'{period} quota value ({quality})' if en else f'{period}满额（{quality}）'
+        parts.append(f'{label} ≈${full:,.2f} API')
+    if spent is not None:
+        label = 'Usage from priced logs' if en else '本机已定价日志折算'
+        parts.append(f'{label} ≈${spent:,.2f}')
+    elif full is not None:
+        parts.append('No priced usage recorded' if en else '暂无已定价的用量记录')
+    if remaining is not None:
+        label = 'Estimated remaining' if en else '预计剩余'
+        parts.append(f'{label} ≈${remaining:,.2f}')
+        for rate, unit, unit_zh in (('cost_safe_per_day', 'day', '天'), ('cost_safe_per_hour', 'hour', '小时')):
+            if win.get(rate) is not None:
+                label = 'Average allowance until reset' if en else '重置前平均可用'
+                parts[-1] += f' ({label} ≈${win[rate]:,.2f}/{unit if en else unit_zh})'
+                break
+    return ' · '.join(parts)
 
 
 def claude_info() -> dict[str, Any]:

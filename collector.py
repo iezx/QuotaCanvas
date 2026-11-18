@@ -12,6 +12,7 @@ import argparse
 import base64
 from collections import Counter, defaultdict
 from contextlib import closing
+from copy import deepcopy
 import datetime
 import glob
 import hashlib
@@ -26,9 +27,9 @@ from typing import Any
 import quota_live as ql
 from zstandard import ZstdError
 from compressed_logs import iter_log_lines
-from pricing import ID_RE, PRICE_STORE
+from pricing import DEFAULT_PRICES, ID_RE, PRICE_STORE, default_rates, resolve_price_model
 from runtime_paths import get_data_dir
-from usage_logs import DSH_HOME, agy_model, dsh_events, dsh_journals, logged_model
+from usage_logs import AGY_MODEL_MAP, DSH_HOME, agy_model, dsh_events, dsh_journals, logged_model, normalize_agy_model
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = get_data_dir(BASE_DIR)
@@ -41,122 +42,21 @@ AGY_HOME = Path(
 ).expanduser()
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_HOME", str(Path.home() / ".claude"))).expanduser()
 
-# Built-in USD per 1,000,000 tokens, in the order (input, cache read,
-# cache write, output). These historical examples may be outdated or inexact.
-# Users can supply verified values in the dashboard. Unpriced usage is excluded
-# from cost totals. Estimates are not subscription billing.
-MODEL_PRICING: dict[str, tuple[float, float, float, float]] = {
-    # OpenAI / Codex models
-    "gpt-6-astra": (10.00, 1.00, 0.00, 50.00),
-    "gpt-6.1-sol": (2.00, 0.10, 0.00, 10.00),
-    "gpt-6.1-terra": (1.00, 0.05, 0.00, 5.00),
-    "gpt-6-sol": (2.00, 0.10, 0.00, 10.00),
-    "gpt-6-terra": (1.00, 0.05, 0.00, 5.00),
-    "gpt-6-luna": (0.10, 0.01, 0.00, 0.50),
-    "gpt-5.6-sol": (4.00, 0.40, 0.00, 20.00),
-    "gpt-5.6-terra": (2.00, 0.20, 0.00, 12.00),
-    "gpt-5.6-luna": (0.20, 0.02, 0.00, 1.20),
-    "gpt-5.4": (2.50, 0.25, 0.00, 15.00),
-    "gpt-reserve": (0.10, 0.01, 0.00, 0.50),
-    "codex-auto-review": (0.10, 0.01, 0.00, 0.50),
-    "o3": (2.00, 0.50, 0.00, 8.00),
-    "o4-mini": (1.10, 0.275, 0.00, 4.40),
-    "gpt-5": (1.25, 0.125, 0.00, 10.00),
-    "gpt-5-mini": (0.25, 0.025, 0.00, 2.00),
-    # Google Antigravity (AGY) & Gemini / Claude models
-    "gemini-4-argon-high": (2.00, 0.10, 0.00, 10.00),
-    "gemini-4-argon-medium": (2.00, 0.10, 0.00, 10.00),
-    "gemini-4-argon-low": (2.00, 0.10, 0.00, 10.00),
-    "gemini-4-argon": (2.00, 0.10, 0.00, 10.00),
-    "gemini-3.8-flash-high": (0.75, 0.075, 0.00, 3.75),
-    "gemini-3.8-flash-medium": (0.75, 0.075, 0.00, 3.75),
-    "gemini-3.8-flash-low": (0.75, 0.075, 0.00, 3.75),
-    "gemini-3.8-flash": (0.75, 0.075, 0.00, 3.75),
-    "gemini-3.5-flash-lite": (0.30, 0.0375, 0.00, 1.875),
-    "claude-opus-5-5-high": (4.00, 0.20, 5.00, 20.00),
-    "claude-opus-5-5-medium": (4.00, 0.20, 5.00, 20.00),
-    "claude-opus-5-5-low": (4.00, 0.20, 5.00, 20.00),
-    "claude-opus-5-5": (4.00, 0.20, 5.00, 20.00),
-    "claude-opus-5": (4.00, 0.20, 5.00, 20.00),
-    "claude-opus-4-8": (5.00, 0.50, 6.25, 25.00),
-    "claude-opus-4-7": (5.00, 0.50, 6.25, 25.00),
-    "claude-opus-4-6": (5.00, 0.50, 6.25, 25.00),
-    "claude-opus-4-5": (5.00, 0.50, 6.25, 25.00),
-    "claude-sonnet-5-5-high": (2.00, 0.10, 2.50, 10.00),
-    "claude-sonnet-5-5-medium": (2.00, 0.10, 2.50, 10.00),
-    "claude-sonnet-5-5-low": (2.00, 0.10, 2.50, 10.00),
-    "claude-sonnet-5-5": (2.00, 0.10, 2.50, 10.00),
-    "claude-sonnet-4-6": (3.00, 0.30, 3.75, 15.00),
-    "claude-sonnet-4-5": (3.00, 0.30, 3.75, 15.00),
-    "claude-haiku-4-5": (1.00, 0.10, 1.25, 5.00),
-    "claude-haiku-4-5-20251001": (1.00, 0.10, 1.25, 5.00),
-    "gpt-oss-120b-medium": (0.15, 0.015, 0.00, 0.60),
-    "gpt-oss-120b": (0.15, 0.015, 0.00, 0.60),
-}
-
-AGY_MODEL_MAP: dict[str, str] = {
-    "gemini 4 argon (high)": "gemini-4-argon-high",
-    "gemini 4 argon (medium)": "gemini-4-argon-medium",
-    "gemini 4 argon (low)": "gemini-4-argon-low",
-    "gemini 3.8 flash (high)": "gemini-3.8-flash-high",
-    "gemini 3.8 flash (medium)": "gemini-3.8-flash-medium",
-    "gemini 3.8 flash (low)": "gemini-3.8-flash-low",
-    "claude opus 5.5 (high)": "claude-opus-5-5-high",
-    "claude opus 5.5 (medium)": "claude-opus-5-5-medium",
-    "claude opus 5.5 (low)": "claude-opus-5-5-low",
-    "claude sonnet 5.5 (high)": "claude-sonnet-5-5-high",
-    "claude sonnet 5.5 (medium)": "claude-sonnet-5-5-medium",
-    "claude sonnet 5.5 (low)": "claude-sonnet-5-5-low",
-    "gpt-oss 120b (medium)": "gpt-oss-120b-medium",
-}
+CACHE_VERSION = 7
 
 
-def normalize_agy_model(raw: str) -> str:
-    if not raw:
-        return "gemini-4-argon-high"
-    s = raw.strip()
-    low = s.lower()
-    if low in AGY_MODEL_MAP:
-        return AGY_MODEL_MAP[low]
-    if ID_RE.fullmatch(s):
-        return s
-    if low.startswith("gemini") and "argon" in low:
-        if "low" in low:
-            return "gemini-4-argon-low"
-        if "medium" in low:
-            return "gemini-4-argon-medium"
-        return "gemini-4-argon-high"
-    if low.startswith("gemini") and "flash" in low:
-        if "low" in low:
-            return "gemini-3.8-flash-low"
-        if "high" in low:
-            return "gemini-3.8-flash-high"
-        return "gemini-3.8-flash-medium"
-    if low.startswith("claude") and "opus" in low:
-        return "claude-opus-5-5"
-    if low.startswith("claude") and "sonnet" in low:
-        if "high" in low:
-            return "claude-sonnet-5-5-high"
-        if "low" in low:
-            return "claude-sonnet-5-5-low"
-        return "claude-sonnet-5-5-medium"
-    if low.startswith("claude") and "haiku" in low:
-        return "claude-haiku-4-5"
-    if "gpt-oss" in low:
-        return "gpt-oss-120b-medium"
-    return re.sub(r"[^a-z0-9._-]+", "-", low).strip("-")
-
-
-def get_model_pricing(model: str) -> tuple[float, float, float, float]:
+def get_model_pricing(model: str, stamp: float | None = None) -> tuple[float, float, float, float]:
     overrides = PRICE_STORE.overrides()
-    if model in overrides:
-        p = overrides[model]
+    model = resolve_price_model(model, overrides)
+    canonical = DEFAULT_PRICES.get(model, {}).get('alias', model)
+    p = overrides.get(model) or overrides.get(canonical)
+    if p:
         return (p['in'], p['cache_read'], p['cache_write'], p['out'])
-    return MODEL_PRICING.get(model, (0, 0, 0, 0))
+    return default_rates(model, stamp)
 
 
-def calc_cost(model: str, inp_uncached: int, cr: int, cw: int, out: int) -> float:
-    p_in, p_cr, p_cw, p_out = get_model_pricing(model)
+def calc_cost(model: str, inp_uncached: int, cr: int, cw: int, out: int, stamp: float | None = None) -> float:
+    p_in, p_cr, p_cw, p_out = get_model_pricing(model, stamp)
     return (inp_uncached * p_in + cr * p_cr + cw * p_cw + out * p_out) / 1_000_000.0
 
 
@@ -289,7 +189,7 @@ def parse_codex_stream(lines_iter, default_session: str = "codex") -> dict[str, 
                 inp_uncached = max(0, inp_total - cr - cw)
                 model = logged_model(pl) or logged_model(u) or cur_model
                 model_provider = pl.get("model_provider") or provider
-                c = calc_cost(model, inp_uncached, cr, cw, out)
+                c = calc_cost(model, inp_uncached, cr, cw, out, ts_val)
                 d = days[day]
                 d["in"] += inp_uncached
                 d["cr"] += cr
@@ -416,7 +316,7 @@ def parse_agy_transcript(path: Path) -> dict[str, Any]:
                     out = int(obj.get("output_tokens") or 0)
                     tok = inp + cr + cw + out
                     if tok > 0:
-                        c = calc_cost(cur_model, inp, cr, cw, out)
+                        c = calc_cost(cur_model, inp, cr, cw, out, ts_val)
                         d = days[day]
                         d["in"] += inp
                         d["cr"] += cr
@@ -703,17 +603,17 @@ def collect_claude_days(recent_events=None) -> tuple[dict[str, dict[str, Any]], 
                         continue
                     seen.add(key)
                     ts_str = o.get("timestamp") or ""
-                    day = ts_to_day(parse_iso_ts(ts_str), ts_str)
+                    stamp = parse_iso_ts(ts_str)
+                    day = ts_to_day(stamp, ts_str)
                     if not day:
                         continue
-                    model = logged_model(msg) or logged_model(obj) or "unknown"
+                    model = logged_model(msg) or logged_model(o) or "unknown"
                     i = int(u.get("input_tokens") or 0)
                     cr = int(u.get("cache_read_input_tokens") or 0)
                     cw = int(u.get("cache_creation_input_tokens") or 0)
                     out = int(u.get("output_tokens") or 0)
-                    c = calc_cost(model, i, cr, cw, out)
+                    c = calc_cost(model, i, cr, cw, out, stamp)
                     if recent_events is not None:
-                        stamp = parse_iso_ts(ts_str)
                         if stamp and stamp >= time.time() - 8 * 86400:
                             recent_events.append((stamp, model, i + cr + cw + out, 1, c))
                     d = days.setdefault(day, {"in": 0, "cr": 0, "cw": 0, "out": 0, "tok": 0, "req": 0, "cost": 0.0, "ses": set()})
@@ -749,7 +649,7 @@ def collect_dsh(previous):
                 usage = days[ts_to_day(stamp)]
                 for field, count in zip(("in", "cr", "cw", "out"), counts):
                     usage[field] += count
-                tokens, cost = sum(counts), calc_cost(used, *counts)
+                tokens, cost = sum(counts), calc_cost(used, *counts, stamp=stamp)
                 usage["tok"] += tokens
                 usage["req"] += 1
                 usage["cost"] += cost
@@ -768,13 +668,12 @@ def collect_all(force_rescan: bool = False) -> dict[str, Any]:
     now_ms = int(now_ts * 1000)
     today_str = datetime.datetime.now(TZ_CST).strftime("%Y-%m-%d")
 
-    cache: dict[str, Any] = {"version": 6, "zst_dirs": {}, "jsonl_files": {}, "agy_files": {}}
+    price_revision = PRICE_STORE.revision()
+    cache: dict[str, Any] = {"version": CACHE_VERSION, "zst_dirs": {}, "jsonl_files": {}, "agy_files": {}}
     if not force_rescan and CACHE_FILE.is_file():
         try:
             loaded = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
-            same_prices = loaded.get('price_revision') == PRICE_STORE.revision()
-            original_cache = 'price_revision' not in loaded and not PRICE_STORE.overrides()
-            if loaded.get("version") == 6 and (same_prices or original_cache):
+            if loaded.get("version") == CACHE_VERSION and loaded.get('price_revision') == price_revision:
                 cache = loaded
         except Exception:
             pass
@@ -842,8 +741,8 @@ def collect_all(force_rescan: bool = False) -> dict[str, Any]:
 
     # Save updated incremental stats-cache.json
     cache_out = {
-        "version": 6,
-        'price_revision': PRICE_STORE.revision(),
+        "version": CACHE_VERSION,
+        'price_revision': price_revision,
         "updated_at": now_ms,
         "zst_dirs": new_zst_cache,
         "jsonl_files": new_jsonl_cache,
@@ -1113,7 +1012,7 @@ def collect_all(force_rescan: bool = False) -> dict[str, Any]:
                         default_key=f"codex:{k}",
                     )
                     w["forecast_text"] = ql.forecast_text(fc, w["resets_at"], w)
-        agl = ql.fetch_agy_live()
+        agl = deepcopy(ql.fetch_agy_live())
         if agl and "error" not in agl:
             for g in agl["groups"]:
                 for b in g["buckets"]:
@@ -1136,7 +1035,7 @@ def collect_all(force_rescan: bool = False) -> dict[str, Any]:
                         )
                     b["forecast_text"] = ql.forecast_text(b["forecast"], b.get("resets_at"), b)
             agy_quota["live"] = agl
-        ccl = ql.fetch_claude_live()
+        ccl = deepcopy(ql.fetch_claude_live())
         if ccl is not None or CLAUDE_HOME.is_dir():
             for b in (ccl or {}).get("buckets", []):
                 bucket = b.get("bucket_id", "")
@@ -1159,7 +1058,10 @@ def collect_all(force_rescan: bool = False) -> dict[str, Any]:
         {"from": first_agy_day, "name": "AGY Pro", "price": 20, "source": "agy"},
     ]
 
-    priced_models = MODEL_PRICING.keys() | PRICE_STORE.overrides().keys()
+    overrides = PRICE_STORE.overrides()
+    priced_models = DEFAULT_PRICES.keys() | overrides.keys()
+    priced_models.update(model for model, _ in summary_models
+                         if resolve_price_model(model, overrides) in priced_models)
     models_sorted = sorted(
         [
             [m, tok, src, round(summary_model_costs[(m, src)], 4) if m in priced_models else None]
@@ -1174,12 +1076,8 @@ def collect_all(force_rescan: bool = False) -> dict[str, Any]:
         reverse=True,
     )
 
-    pricing_table = {
-        m: {"in": p[0], "cr": p[1], "cw": p[2], "out": p[3]}
-        for m, p in MODEL_PRICING.items()
-    }
-    pricing_table.update({m: {'in': p['in'], 'cr': p['cache_read'], 'cw': p['cache_write'], 'out': p['out']}
-                          for m, p in PRICE_STORE.overrides().items()})
+    pricing_table = {m: dict(zip(('in', 'cr', 'cw', 'out'), get_model_pricing(m, now_ts)))
+                     for m in priced_models}
 
     stats_payload = {
         "days": days_list,

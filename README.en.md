@@ -4,7 +4,7 @@
 
 A browser dashboard for local Codex, Antigravity, Claude Code, and DeepSeek Harness usage. For supported agents, it also displays quotas, reads conversations, and schedules messages.
 
-**v0.0.1 · Linux / Windows x64 · [MIT License](LICENSE)**
+**v0.0.2 · Linux / Windows x64 · [MIT License](LICENSE)**
 
 ![QuotaCanvas usage overview with sample data](docs/demo-overview-en.png)
 
@@ -12,7 +12,7 @@ A browser dashboard for local Codex, Antigravity, Claude Code, and DeepSeek Harn
 
 ### Windows (x64)
 
-1. Download `QuotaCanvas-v0.0.1-windows-x64.zip` from GitHub **Releases** and extract the entire folder.
+1. Download `QuotaCanvas-v0.0.2-windows-x64.zip` from GitHub **Releases** and extract the entire folder.
 2. Double-click `QuotaCanvas.exe` and set a dashboard password on first launch. Python is included.
 3. Click **Open local dashboard** or visit [http://127.0.0.1:8088](http://127.0.0.1:8088). Closing the main window stops the service.
 
@@ -42,6 +42,8 @@ Run QuotaCanvas under the same Linux account you use for your agents. The defaul
 - **Price research** supports one-off or scheduled lookups with a local agent. To use another AI, copy the prompt from the pricing page and import its JSON response. Check the source, then select **Apply suggestion**.
 - **Local conversations** lets you read, create, continue, and schedule messages for supported agents. Native Codex questions appear below the conversation. Enter `/help` for commands supported by the selected agent.
 - **Settings** shows finished-task output rates and quota exhaustion history. You can also hide email addresses, set subscription dates, and limit failed sign-in attempts.
+
+Bundled prices come from `model_prices.json`. Manual prices and research suggestions are stored in `data/prices.json`. Choose a provider to narrow the research scope. The pricing page shows the next scheduled check. Apply the suggestions you approve. Built-in rate changes use the usage timestamp and the UTC effective date. Manual prices take precedence.
 
 ## Linux command reference
 

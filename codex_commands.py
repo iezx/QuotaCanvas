@@ -11,7 +11,7 @@ import struct
 
 def rpc(method, params, *, resume_thread=False, first_turn=None, on_message=None, after_result=None):
     if os.name == 'nt':
-        raise ValueError('Native Codex controls require Linux and a compatible app-server')
+        raise ValueError('Native Codex controls require Linux/WSL2 and a compatible app-server; Windows CLI messaging remains separate')
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(20)
     try:
@@ -78,7 +78,7 @@ def rpc(method, params, *, resume_thread=False, first_turn=None, on_message=None
                 return response.get('result', {})
 
         capabilities = {'experimentalApi': True} if params.get('historyMode') or on_message is not None else None
-        send({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'quotacanvas', 'version': '0.0.1'}, 'capabilities': capabilities}})
+        send({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'quotacanvas', 'version': '0.0.2'}, 'capabilities': capabilities}})
         wait_for(1)
         send({'jsonrpc': '2.0', 'method': 'initialized'})
         if resume_thread:

@@ -25,6 +25,7 @@ from typing import Any
 from compressed_logs import iter_log_lines
 from runtime_paths import get_data_dir
 from remote_access import secure_write
+from usage_logs import agy_model, normalize_agy_model
 import codex_commands
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -133,9 +134,27 @@ def list_codex_conversations(include_subthreads: bool = False, limit: int = 100)
     return items
 
 
+def _normalize_agy_id(raw: str) -> str:
+    return normalize_agy_model(raw, default="")
+
+
+def _default_agy_model() -> str:
+    settings_path = AGY_HOME / "settings.json"
+    if settings_path.is_file():
+        try:
+            st = json.loads(settings_path.read_text(encoding="utf-8", errors="ignore"))
+            normalized = _normalize_agy_id(str(st.get("model") or ""))
+            if normalized:
+                return normalized
+        except Exception:
+            pass
+    return "gemini-4-hydrogen-xhigh"
+
+
 def list_agy_conversations(limit: int = 100) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
+    fallback_model = _default_agy_model()
     db_path = AGY_HOME / "conversation_summaries.db"
     if db_path.is_file():
         try:
@@ -181,7 +200,7 @@ def list_agy_conversations(limit: int = 100) -> list[dict[str, Any]]:
                         "title": title or f"AGY 对话 {cid[:8]}",
                         "preview": (r.get("preview") or title or "")[:240],
                         "cwd": cwd,
-                        "model": r.get("agent_name") or "gemini-3.8-flash-high",
+                        "model": _normalize_agy_id(r.get("agent_name") or "") or fallback_model,
                         "created_at": upd,
                         "updated_at": upd,
                         "step_count": step_count,
@@ -225,7 +244,7 @@ def list_agy_conversations(limit: int = 100) -> list[dict[str, Any]]:
                 "title": first_msg[:80] if first_msg else f"AGY 对话 {cid[:8]}",
                 "preview": first_msg[:240],
                 "cwd": str(BASE_DIR),
-                "model": "gemini-3.8-flash-high",
+                "model": fallback_model,
                 "created_at": int(st.st_mtime),
                 "updated_at": int(st.st_mtime),
                 "step_count": step_cnt,
@@ -306,15 +325,29 @@ def list_claude_conversations(limit: int = 100) -> list[dict[str, Any]]:
 
 
 def list_all_conversations(
-    source_filter: str | None = None, include_subthreads: bool = False, limit: int = 100
+    source_filter: str | None = None,
+    include_subthreads: bool = False,
+    limit: int = 100,
+    query: str = "",
 ) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit or 100), 500))
+    q_low = (query or "").strip().lower()
+    fetch_limit = max(limit, 300) if q_low else limit
     res: list[dict[str, Any]] = []
     if not source_filter or source_filter == "all" or source_filter == "codex":
-        res.extend(list_codex_conversations(include_subthreads=include_subthreads, limit=limit))
+        res.extend(list_codex_conversations(include_subthreads=include_subthreads, limit=fetch_limit))
     if not source_filter or source_filter == "all" or source_filter == "agy":
-        res.extend(list_agy_conversations(limit=limit))
+        res.extend(list_agy_conversations(limit=fetch_limit))
     if not source_filter or source_filter == "all" or source_filter == "cc":
-        res.extend(list_claude_conversations(limit=limit))
+        res.extend(list_claude_conversations(limit=fetch_limit))
+    if q_low:
+        res = [
+            item
+            for item in res
+            if q_low in " ".join(
+                str(item.get(k) or "") for k in ("id", "title", "preview", "cwd", "model", "source")
+            ).lower()
+        ]
     res.sort(key=lambda x: x.get("updated_at") or 0, reverse=True)
     return res[:limit]
 
@@ -393,11 +426,20 @@ def get_conversation_messages(source: str, conv_id: str, limit: int | None = 25)
         if not t_path.is_file():
             return messages
         try:
+            current_model = ""
             with open(t_path, "r", encoding="utf-8", errors="ignore") as f:
                 for obj in _json_records(f):
+                    m_raw = agy_model(obj)
+                    if m_raw:
+                        current_model = _normalize_agy_id(m_raw)
                     t = obj.get("type")
                     content = obj.get("content") or ""
-                    if not isinstance(content, str) or not content.strip():
+                    tool_names = [
+                        str(tc.get("name") or (tc.get("function") or {}).get("name"))
+                        for tc in (obj.get("tool_calls") or [])
+                        if isinstance(tc, dict) and (tc.get("name") or (tc.get("function") or {}).get("name"))
+                    ] if t == "PLANNER_RESPONSE" and isinstance(obj.get("tool_calls"), list) else []
+                    if not isinstance(content, str) or (not content.strip() and not tool_names):
                         continue
                     if t == "USER_INPUT":
                         if content.startswith("User changed setting"):
@@ -416,16 +458,20 @@ def get_conversation_messages(source: str, conv_id: str, limit: int | None = 25)
                             }
                         )
                     elif t == "PLANNER_RESPONSE":
-                        messages.append(
-                            {
-                                "role": "assistant",
-                                "text": content,
-                                "timestamp": obj.get("created_at") or "",
-                                "tokens": int(obj.get("input_tokens") or 0)
-                                + int(obj.get("cache_read_tokens") or 0)
-                                + int(obj.get("output_tokens") or 0),
-                            }
-                        )
+                        entry: dict[str, Any] = {
+                            "role": "assistant",
+                            "text": content,
+                            "timestamp": obj.get("created_at") or "",
+                            "tokens": int(obj.get("input_tokens") or 0)
+                            + int(obj.get("cache_read_tokens") or 0)
+                            + int(obj.get("cache_write_tokens") or 0)
+                            + int(obj.get("output_tokens") or 0),
+                        }
+                        if current_model:
+                            entry["model"] = current_model
+                        if tool_names:
+                            entry["tools"] = tool_names
+                        messages.append(entry)
         except Exception:
             pass
         return messages if limit is None else messages[-limit:]
@@ -506,13 +552,25 @@ def get_conversation_messages(source: str, conv_id: str, limit: int | None = 25)
                     content = msg.get("content") if isinstance(msg, dict) else ""
                     txt = _message_text(content)
                     if txt.strip():
-                        messages.append(
-                            {
-                                "role": role,
-                                "text": txt,
-                                "timestamp": obj.get("timestamp") or "",
-                            }
-                        )
+                        entry = {
+                            "role": role,
+                            "text": txt,
+                            "timestamp": obj.get("timestamp") or "",
+                        }
+                        if role == "assistant" and isinstance(msg, dict):
+                            if msg.get("model"):
+                                entry["model"] = str(msg["model"])
+                            usage = msg.get("usage")
+                            if isinstance(usage, dict):
+                                tok = (
+                                    int(usage.get("input_tokens") or 0)
+                                    + int(usage.get("cache_read_input_tokens") or 0)
+                                    + int(usage.get("cache_creation_input_tokens") or 0)
+                                    + int(usage.get("output_tokens") or 0)
+                                )
+                                if tok > 0:
+                                    entry["tokens"] = tok
+                        messages.append(entry)
         except Exception:
             pass
         return messages if limit is None else messages[-limit:]
@@ -595,14 +653,17 @@ def build_cli_command(
         if full_access:
             cmd.append('--dangerously-skip-permissions')
         eff_model = model
-        if eff_model and effort in ("low", "medium", "high"):
-            for prefix in (
-                "gemini-4-argon",
-                "gemini-3.8-flash",
-                "claude-sonnet-5-5",
-                "claude-opus-5-5",
-            ):
-                if eff_model == prefix or eff_model.startswith(prefix + "-"):
+        agy_effort_tiers = {
+            "gemini-4-hydrogen": ("low", "medium", "high", "xhigh"),
+            "gemini-4-carbon": ("low", "medium", "high", "xhigh"),
+            "gemini-4-argon": ("low", "medium", "high"),
+            "gemini-3.8-flash": ("low", "medium", "high"),
+            "claude-sonnet-5-5": ("low", "medium", "high"),
+            "claude-opus-5-5": ("low", "medium", "high"),
+        }
+        if eff_model and effort:
+            for prefix, tiers in agy_effort_tiers.items():
+                if effort in tiers and (eff_model == prefix or eff_model.startswith(prefix + "-")):
                     eff_model = f"{prefix}-{effort}"
                     break
         if eff_model:
@@ -1039,7 +1100,7 @@ def detect_exhausted_reset_at(
                         continue
                     if ("claude" in m_low or "gpt" in m_low) and "claude" not in gname and "gpt" not in gname:
                         continue
-                    if "flash" in m_low and "argon" in gname:
+                    if ("flash" in m_low or "hydrogen" in m_low) and "argon" in gname:
                         continue
                 for b in g.get("buckets") or []:
                     matched_buckets.append(b)
@@ -1082,7 +1143,11 @@ def upsert_schedule(payload: dict[str, Any], quotas: dict[str, Any] | None = Non
         existing = next((s for s in schedules if s.get("id") == sid), None)
 
         stype = payload.get("schedule_type") or (existing or {}).get("schedule_type") or "once"
+        if stype not in ("once", "daily", "interval", "on_quota_reset"):
+            raise ValueError("Unsupported schedule_type")
         source = payload.get("source") or (existing or {}).get("source") or "codex"
+        if source not in ("codex", "agy", "cc"):
+            raise ValueError("Unsupported conversation source")
         model_val = payload.get("model") if "model" in payload else (existing or {}).get("model", "")
         target_reset_at = None
         quota_status = (existing or {}).get("quota_status") or ""
@@ -1139,6 +1204,34 @@ def delete_schedule(schedule_id: str) -> bool:
             return False
         _save_json_file(SCHEDULES_FILE, new_list)
         return True
+
+
+def _dispatch_schedule(sched: dict[str, Any], trigger_reason: str) -> dict[str, Any]:
+    return send_message_async(
+        source=sched["source"],
+        conv_id=sched["conv_id"],
+        prompt=sched["prompt"],
+        conv_title=sched.get("conv_title") or "",
+        cwd=sched.get("cwd"),
+        model=sched.get("model") or None,
+        effort=sched.get("effort") or None,
+        schedule_id=sched["id"],
+        trigger_reason=trigger_reason,
+    )
+
+
+def run_schedule_now(schedule_id: str) -> dict[str, Any]:
+    now_ts = int(time.time())
+    with _LOCK:
+        schedules: list[dict[str, Any]] = _load_json_file(SCHEDULES_FILE, [])
+        target = next((s for s in schedules if s.get("id") == schedule_id), None)
+        if not target:
+            raise KeyError("schedule not found")
+        target["last_run_at"] = now_ts
+        target["run_count"] = int(target.get("run_count") or 0) + 1
+        snapshot = dict(target)
+        _save_json_file(SCHEDULES_FILE, schedules)
+    return _dispatch_schedule(snapshot, "manual:schedule")
 
 
 def check_and_run_schedules(quotas: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -1198,18 +1291,4 @@ def check_and_run_schedules(quotas: dict[str, Any] | None = None) -> list[dict[s
         if changed:
             _save_json_file(SCHEDULES_FILE, schedules)
 
-    results = []
-    for sched in triggered:
-        res = send_message_async(
-            source=sched["source"],
-            conv_id=sched["conv_id"],
-            prompt=sched["prompt"],
-            conv_title=sched.get("conv_title") or "",
-            cwd=sched.get("cwd"),
-            model=sched.get("model") or None,
-            effort=sched.get("effort") or None,
-            schedule_id=sched["id"],
-            trigger_reason=f"schedule:{sched.get('schedule_type')}",
-        )
-        results.append(res)
-    return results
+    return [_dispatch_schedule(sched, f"schedule:{sched.get('schedule_type')}") for sched in triggered]

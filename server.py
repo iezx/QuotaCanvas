@@ -26,13 +26,14 @@ from runtime_paths import get_data_dir
 from quota_windows import QuotaLog
 from auth import AuthManager, SESSION_SECONDS, configure_password
 from ui_settings import UISettings
-from pricing import PRICE_STORE, PRICE_RESEARCH, AGENTS, ID_RE, RESEARCH_PROMPT, find_agent, list_agent_models
+from pricing import PRICE_STORE, PRICE_RESEARCH, AGENTS, DEFAULT_PRICES, FIELDS, ID_RE, research_prompt, find_agent, list_agent_models, upcoming_default_rate, model_price_candidates, openrouter_native_id, resolve_price_model, validate_model
+from provider_sources import ProviderSourceStore, ProviderSyncManager, match_local_model
 from remote_access import RemoteAccessError, RemoteAccessManager
 from static_web_cache import StaticWebCache
 from task_activity import TaskActivity
 from usage_logs import DSH_HOME
 
-from collector import MODEL_PRICING, STATS_JSON_FILE, collect_all, print_cli_report
+from collector import STATS_JSON_FILE, collect_all, get_model_pricing, print_cli_report
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = get_data_dir(BASE_DIR)
@@ -56,9 +57,22 @@ AUTH = AuthManager(DATA_DIR / 'password.json')
 UI_SETTINGS = UISettings(DATA_DIR / 'ui_settings.json')
 QUOTA_LOG = QuotaLog(DATA_DIR / 'quota_windows.json')
 TASK_ACTIVITY = TaskActivity(conv.CODEX_HOME, conv.AGY_HOME, conv.CLAUDE_HOME, history_path=DATA_DIR / 'task_history.json', dsh_home=DSH_HOME)
+PROVIDER_STORE = ProviderSourceStore(DATA_DIR / 'provider_sources.json')
 
 _collect_lock = threading.Lock()
 _latest_stats: dict | None = None
+
+
+def _observed_models() -> list[str]:
+    return sorted({row[0] for row in (_latest_stats or {}).get('summary', {}).get('models', [])
+                   if row[0] != 'unknown' and ID_RE.fullmatch(row[0])})
+
+
+def _trigger_stats_refresh() -> None:
+    threading.Thread(target=refresh_stats, kwargs={'force': True}, daemon=True).start()
+
+
+PROVIDER_SYNC = ProviderSyncManager(PROVIDER_STORE, PRICE_STORE, DEFAULT_PRICES, on_prices_updated=_trigger_stats_refresh)
 
 
 class ThreadingHTTPServer(BaseThreadingHTTPServer):
@@ -92,6 +106,7 @@ class ThreadingHTTPServer(BaseThreadingHTTPServer):
 def display_payload(payload, language='zh'):
     result = UI_SETTINGS.public_payload(payload)
     if language != 'en':
+        ql.add_5h_cycle_forecasts(result, language)
         return result
     def localize(value, role=''):
         if isinstance(value, list):
@@ -101,7 +116,7 @@ def display_payload(payload, language='zh'):
             for key, item in value.items():
                 localize(item, key)
             forecast = value.get('forecast')
-            minutes = value.get('window_minutes') or (forecast or {}).get('window_minutes')
+            minutes = ql.quota_window_minutes(value) or (forecast or {}).get('window_minutes')
             if forecast:
                 value['forecast_text'] = ql.forecast_text(forecast, value.get('resets_at'), value, language='en')
             if value.get('cost_text'):
@@ -111,6 +126,7 @@ def display_payload(payload, language='zh'):
                 prefix = role.title() + ' ' if role in ('primary', 'secondary') else ''
                 value['label'] = f'{prefix}{unit} quota window'
     localize(result)
+    ql.add_5h_cycle_forecasts(result, language)
     return result
 
 
@@ -149,6 +165,17 @@ def build_live() -> dict:
     """Live quotas (official APIs, fallback to local logs) + forecasts."""
     stats = json.loads(STATS_JSON_FILE.read_text(encoding="utf-8")) if STATS_JSON_FILE.is_file() else {}
     q = stats.get("quotas", {})
+
+    def update_window(window, collected, minutes, key, same_duration):
+        reset = window.get("resets_at")
+        window["forecast"] = ql.forecast_window(window.get("used_percent"), minutes, reset)
+        if (minutes and same_duration and reset and reset == collected.get("resets_at")
+                and "cost_observed" in collected):
+            window["cost_observed"] = collected["cost_observed"]
+            window["cost_models"] = collected.get("cost_models", [])
+            ql.estimate_cost(window, minutes, key)
+        window["forecast_text"] = ql.forecast_text(window["forecast"], reset, window)
+
     cx_live = ql.fetch_codex_live()
     agy_live = ql.fetch_agy_live()
     out: dict = {"generated": int(time.time())}
@@ -164,47 +191,98 @@ def build_live() -> dict:
     for k in ("primary", "secondary"):
         w = cx.get(k)
         if w:
-            w["label"] = ql.codex_window_label(w.get("window_minutes"), k)
-            w["forecast"] = ql.forecast_window(w.get("used_percent"), w.get("window_minutes"), w.get("resets_at"))
+            w = cx[k] = dict(w)
+            minutes = w.get("window_minutes")
+            w["label"] = ql.codex_window_label(minutes, k)
             sw = (q.get("codex") or {}).get(k) or {}
-            if all(w.get(f) == sw.get(f) for f in ("window_minutes", "resets_at", "used_percent")):
-                for f in ("cost_text", "cost_used", "cost_quota_total", "cost_remaining", "cost_projected", "cost_safe_per_day", "cost_safe_per_hour", "cost_models", "cost_observed", "cost_is_estimated"):
-                    if f in sw:
-                        w[f] = sw[f]
-            w["forecast_text"] = ql.forecast_text(w["forecast"], w.get("resets_at"), w)
+            update_window(w, sw, minutes, f"codex:{k}", minutes == sw.get("window_minutes"))
     out["codex"] = cx
 
     ag = {"source_of_truth": "live" if agy_live and "error" not in agy_live else "local_log"}
     if agy_live and "error" not in agy_live:
         ag.update(agy_live)
+        saved_groups = ((q.get("agy") or {}).get("live") or {}).get("groups", [])
+        saved_buckets = {(g["name"], b["bucket_id"]): b for g in saved_groups for b in g["buckets"]}
+        ag["groups"] = [{**g, "buckets": [dict(b) for b in g["buckets"]]} for g in ag["groups"]]
         for g in ag["groups"]:
             for b in g["buckets"]:
+                bucket_id = b["bucket_id"]
+                saved = saved_buckets.get((g["name"], bucket_id), {})
                 wm = {"5h": 300, "weekly": 10080}.get(b.get("window"))
-                b["forecast"] = ql.forecast_window(b.get("used_percent"), wm, b.get("resets_at"))
-        sb = {x["bucket_id"] + g2["name"]: x for g2 in ((q.get("agy") or {}).get("live") or {}).get("groups", []) for x in g2["buckets"]}
-        for g in ag["groups"]:
-            for b in g["buckets"]:
-                x = sb.get(b["bucket_id"] + g["name"], {})
-                if any(b.get(f) != x.get(f) for f in ("window", "resets_at", "used_percent")):
-                    continue
-                for f in ("forecast_text", "cost_text", "cost_used", "cost_quota_total", "cost_remaining", "cost_projected", "cost_safe_per_day", "cost_safe_per_hour", "cost_models", "cost_observed", "cost_is_estimated"):
-                    if f in x:
-                        b[f] = x[f]
+                update_window(b, saved, wm, f"agy:{bucket_id}", b.get("window") == saved.get("window"))
     else:
         ag.update({"error": (agy_live or {}).get("error", "token unavailable"), "local": q.get("agy")})
     out["agy"] = ag
-    out["cc"] = ql.claude_info()
+    cc = ql.claude_info()
+    if (cc.get("quota") or {}).get("buckets"):
+        saved_buckets = {b["bucket_id"]: b for b in (q.get("cc") or {}).get("buckets", [])}
+        quota = cc["quota"]
+        buckets = [dict(b) for b in quota["buckets"]]
+        for b in buckets:
+            bucket_id = b["bucket_id"]
+            saved = saved_buckets.get(bucket_id, {})
+            minutes = b.get("window_minutes")
+            update_window(b, saved, minutes, f"cc:{bucket_id}", minutes == saved.get("window_minutes"))
+        cc["quota"] = {**quota, "buckets": buckets}
+    out["cc"] = cc
     return out
+
+
+def _pricing_payload() -> dict:
+    state = PRICE_STORE.state()
+    now = time.time()
+    overrides = state['overrides']
+    observed = _observed_models()
+    priced_models = DEFAULT_PRICES.keys() | overrides.keys()
+    log_prices = {model: resolve_price_model(model, overrides) for model in observed}
+    tbl = {}
+    for model in sorted(priced_models | {model for model, price_id in log_prices.items() if price_id in priced_models}):
+        model_id = log_prices.get(model, model)
+        canonical = DEFAULT_PRICES.get(model_id, {}).get('alias', model_id)
+        override = overrides.get(model_id) or overrides.get(canonical)
+        tbl[model] = {k: override[k] for k in FIELDS} if override else dict(zip(FIELDS, get_model_pricing(model, now)))
+    catalog = {}
+    metadata = dict(state['metadata'])
+    for model, entry in DEFAULT_PRICES.items():
+        canonical = entry.get('alias', model)
+        entry = DEFAULT_PRICES[canonical]
+        if canonical in metadata:
+            metadata.setdefault(model, metadata[canonical])
+        if entry.get('source'):
+            catalog[model] = {key: entry[key] for key in ('source', 'verified_on', 'description')}
+            change = upcoming_default_rate(model, now)
+            if change:
+                catalog[model]['next_rate'] = change
+    for model, price_id in log_prices.items():
+        if price_id in metadata:
+            metadata.setdefault(model, metadata[price_id])
+    return {
+        "unit": "USD per 1M tokens",
+        "models": tbl,
+        'observed_models': observed,
+        'research_prompt': research_prompt(),
+        'catalog': catalog,
+        'overrides': list(state['overrides']),
+        'metadata': metadata,
+        'proposals': state['proposals'],
+        'schedule': state['schedule'],
+        'last_checked': state['last_checked'],
+        'agents': {key: {'installed': bool(find_agent(key))} for key in AGENTS},
+        'research_runs': PRICE_RESEARCH.history.list(),
+        'provider_sources': PROVIDER_SYNC.public_state(PRICE_STORE, DEFAULT_PRICES, observed),
+        'last_error': state['last_error'],
+        'last_rejected': state['last_rejected'],
+        'running': PRICE_RESEARCH.running,
+    }
 
 
 def scheduler_loop() -> None:
     while True:
         try:
-            if PRICE_STORE.claim_due():
-                try:
-                    PRICE_RESEARCH.start()
-                except ValueError:
-                    pass
+            PRICE_RESEARCH.start(scheduled=True)
+            observed = _observed_models()
+            PROVIDER_SYNC.start_scheduled(observed_models=observed)
+            PROVIDER_SYNC.start_unpriced_lookup_if_needed(observed_models=observed)
             live = build_live()
             quotas = {
                 "codex": live.get("codex") or {},
@@ -233,9 +311,9 @@ class UsageHTTPHandler(SimpleHTTPRequestHandler):
         if code != HTTPStatus.NOT_FOUND:
             return super().send_error(code, message, explain)
         path = self.path.split('?', 1)[0]
-        known = {'/', '/index.html', '/live.html', '/settings.html', '/favicon.svg',
+        known = {'/', '/index.html', '/live.html', '/settings.html', '/pricing.html', '/favicon.svg',
                  '/assets/index.css', '/assets/index.js', '/assets/auth.css', '/assets/auth.js',
-                 '/assets/conversations.js', '/assets/remote-settings.js'}
+                 '/assets/conversations.js', '/assets/remote-settings.js', '/assets/price-ui.js', '/assets/pricing.css'}
         failure = sys.exc_info()[1]
         detail = (f' error={type(failure).__name__} errno={failure.errno}'
                   if isinstance(failure, OSError) and isinstance(failure.errno, int) else '')
@@ -443,6 +521,7 @@ class UsageHTTPHandler(SimpleHTTPRequestHandler):
             try:
                 action = body.get('action')
                 result = {'ok': True}
+                observed = _observed_models()
                 if action == 'save':
                     with _collect_lock:
                         PRICE_STORE.save_override(body.get('model'), body.get('prices') or {})
@@ -457,14 +536,67 @@ class UsageHTTPHandler(SimpleHTTPRequestHandler):
                             raise ValueError('Wait until the current price research finishes')
                         PRICE_STORE.store_research(body.get('models'), merge=True)
                 elif action == 'research':
-                    result['research_id'] = PRICE_RESEARCH.start(body.get('agent'), body.get('research_model'))
+                    args = (body.get('agent'), body.get('research_model'))
+                    result['research_id'] = (PRICE_RESEARCH.start(*args, scope=body['scope'])
+                                             if 'scope' in body else PRICE_RESEARCH.start(*args))
                 elif action == 'schedule':
                     PRICE_STORE.configure(body.get('enabled'), body.get('interval_hours'),
-                                          body.get('agent', 'codex'), body.get('research_model', ''))
+                                          body.get('agent', 'codex'), body.get('research_model', ''), scope=body.get('scope', 'all'))
+                elif action == 'sources_save':
+                    PROVIDER_STORE.configure(sources=body.get('sources'), schedule=body.get('schedule'))
+                    result['provider_sources'] = PROVIDER_SYNC.public_state(PRICE_STORE, DEFAULT_PRICES, observed)
+                elif action == 'sources_refresh':
+                    if 'sources' in body or 'schedule' in body:
+                        PROVIDER_STORE.configure(sources=body.get('sources'), schedule=body.get('schedule'))
+                    result['outcomes'] = PROVIDER_SYNC.refresh(body.get('target_sources'), observed_models=observed, price_store=PRICE_STORE)
+                    result['provider_sources'] = PROVIDER_SYNC.public_state(PRICE_STORE, DEFAULT_PRICES, observed)
+                elif action == 'sync_quote':
+                    quote = PROVIDER_STORE.get_openrouter_quote(body.get('quote_id'))
+                    if not quote:
+                        raise ValueError('OpenRouter quote not found')
+                    if not quote.get('quote_available'):
+                        raise ValueError('This OpenRouter model has dynamic pricing and cannot be synced')
+                    known_all = DEFAULT_PRICES.keys() | PRICE_STORE.overrides().keys()
+                    known_all.update(candidate for model in observed for candidate in model_price_candidates(model))
+                    target_model = body.get('target_model')
+                    native = openrouter_native_id(quote['id'])
+                    if target_model:
+                        validate_model(target_model)
+                    if (not target_model or target_model in model_price_candidates(quote['id'])
+                            or native in model_price_candidates(target_model)):
+                        target_model = match_local_model(quote, known_all, DEFAULT_PRICES) or native
+                    with _collect_lock:
+                        prices = PRICE_STORE.save_channel_price(
+                            target_model, quote, source=quote['source'],
+                            description=quote.get('name') or quote['id'],
+                            channel='openrouter', channel_model=quote['id'],
+                            overwrite_manual=bool(body.get('overwrite_manual')),
+                        )
+                    result.update(model=target_model, prices=prices)
+                elif action == 'sync_matched':
+                    with _collect_lock:
+                        result['sync'] = PROVIDER_SYNC.sync_matched(
+                            observed_models=observed,
+                            price_store=PRICE_STORE,
+                            include_discovered=bool(body.get('include_discovered')),
+                        )
+                elif action == 'lookup_unpriced':
+                    result['lookup'] = PROVIDER_SYNC.lookup_unpriced_models(
+                        observed_models=observed, force=bool(body.get('force', True)), price_store=PRICE_STORE,
+                    )
+                elif action == 'dismiss_discovered':
+                    PROVIDER_STORE.dismiss_discovered(body.get('source'), body.get('model'))
+                elif action == 'restore_discovered':
+                    PROVIDER_STORE.restore_discovered(body.get('source'), body.get('model'))
                 else:
                     raise ValueError('Unsupported pricing action')
-                if action in ('save', 'apply'):
-                    threading.Thread(target=refresh_stats, kwargs={'force': True}, daemon=True).start()
+                if action in ('save', 'apply', 'sync_quote') or (
+                    action in ('sync_matched', 'lookup_unpriced') and result.get('sync', {}).get('synced')
+                ):
+                    _trigger_stats_refresh()
+                if action in ('save', 'apply', 'dismiss', 'import', 'sources_save', 'sources_refresh',
+                              'sync_quote', 'sync_matched', 'lookup_unpriced', 'dismiss_discovered', 'restore_discovered'):
+                    result['pricing'] = _pricing_payload()
                 self._send_json(json.dumps(result, ensure_ascii=False).encode())
             except (ValueError, OSError) as error:
                 self._send_json(json.dumps({'error': str(error)}, ensure_ascii=False).encode(), 400)
@@ -530,14 +662,24 @@ class UsageHTTPHandler(SimpleHTTPRequestHandler):
                 ok = conv.delete_schedule(body.get("id", ""))
                 self._send_json(json.dumps({"deleted": ok}).encode())
                 return
+            if body.get("run_now"):
+                try:
+                    entry = conv.run_schedule_now(body.get("id", ""))
+                    self._send_json(json.dumps({"triggered": True, "entry": entry}, ensure_ascii=False).encode())
+                except KeyError:
+                    self._send_json(b'{"error":"schedule not found"}', HTTPStatus.NOT_FOUND)
+                return
             quotas = None
             if STATS_JSON_FILE.is_file():
                 try:
                     quotas = json.loads(STATS_JSON_FILE.read_text(encoding="utf-8")).get("quotas")
                 except Exception:
                     pass
-            sc = conv.upsert_schedule(body, quotas)
-            self._send_json(json.dumps(sc, ensure_ascii=False).encode())
+            try:
+                sc = conv.upsert_schedule(body, quotas)
+                self._send_json(json.dumps(sc, ensure_ascii=False).encode())
+            except ValueError as error:
+                self._send_json(json.dumps({"error": str(error)}, ensure_ascii=False).encode(), HTTPStatus.BAD_REQUEST)
             return
         self._send_json(b'{"error":"not found"}', HTTPStatus.NOT_FOUND)
 
@@ -648,18 +790,8 @@ class UsageHTTPHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/pricing":
-            tbl = {m: {"in": p[0], "cache_read": p[1], "cache_write": p[2], "out": p[3]} for m, p in MODEL_PRICING.items()}
-            tbl.update(PRICE_STORE.overrides())
-            state = PRICE_STORE.state()
-            observed = sorted({row[0] for row in (_latest_stats or {}).get('summary', {}).get('models', [])
-                               if row[0] != 'unknown' and ID_RE.fullmatch(row[0])})
-            self._send_json(json.dumps({"unit": "USD per 1M tokens", "models": tbl, 'observed_models': observed,
-                                       'research_prompt': RESEARCH_PROMPT,
-                                       'overrides': list(state['overrides']), 'metadata': state['metadata'], 'proposals': state['proposals'],
-                                       'schedule': state['schedule'], 'last_checked': state['last_checked'],
-                                       'agents': {key: {'installed': bool(find_agent(key))} for key in AGENTS},
-                                       'research_runs': PRICE_RESEARCH.history.list(),
-                                       'last_error': state['last_error'], 'running': PRICE_RESEARCH.running}, ensure_ascii=False).encode())
+            PROVIDER_SYNC.start_unpriced_lookup_if_needed(observed_models=_observed_models())
+            self._send_json(json.dumps(_pricing_payload(), ensure_ascii=False).encode())
             return
 
         if path == '/api/models':
@@ -673,10 +805,15 @@ class UsageHTTPHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/conversations":
             qs = parse_qs(parsed.query)
+            try:
+                limit = int((qs.get("limit") or ["100"])[0])
+            except ValueError:
+                limit = 100
             items = conv.list_all_conversations(
                 source_filter=(qs.get("source") or ["all"])[0],
                 include_subthreads=(qs.get("sub") or ["0"])[0] == "1",
-                limit=int((qs.get("limit") or ["100"])[0]),
+                limit=limit,
+                query=(qs.get("q") or [""])[0],
             )
             self._send_json(json.dumps(items, ensure_ascii=False).encode())
             return

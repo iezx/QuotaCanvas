@@ -4,7 +4,7 @@
 
 在浏览器查看 Codex、Antigravity、Claude Code 和 DeepSeek Harness 的本机 AI 用量。对于受支持的 Agent，还可以查看额度、阅读对话和定时发送消息。
 
-**v0.0.1 · Linux / Windows x64 · [MIT 许可证](LICENSE)**
+**v0.0.2 · Linux / Windows x64 · [MIT 许可证](LICENSE)**
 
 ![QuotaCanvas 用量总览（示例数据）](docs/demo-overview-en.png)
 
@@ -12,7 +12,7 @@
 
 ### Windows（x64）
 
-1. 在 GitHub **Releases** 下载 `QuotaCanvas-v0.0.1-windows-x64.zip`，完整解压。
+1. 在 GitHub **Releases** 下载 `QuotaCanvas-v0.0.2-windows-x64.zip`，完整解压。
 2. 双击 `QuotaCanvas.exe`，首次启动时设置面板密码。安装包已包含 Python。
 3. 点击「打开本机面板」，或在浏览器访问 [http://127.0.0.1:8088](http://127.0.0.1:8088)。关闭主窗口会停止服务。
 
@@ -42,6 +42,8 @@ python server.py
 - **查价**支持调用本机 Agent 或定时查询。也可以复制提示词给其他 AI，再导入返回的 JSON。核对来源后点击「应用建议」生效。
 - **本机对话**支持阅读、创建和继续对话，以及定时发送消息。Codex 原生提问显示在对话下方。输入 `/help` 查看当前 Agent 支持的命令。
 - **设置**可查看已完成任务的平均 tok/s 和额度耗尽记录，也可以隐藏邮箱、设置订阅日期和限制登录失败次数。
+
+默认价格来自项目中的 `model_prices.json`。手动价格和查价建议保存在 `data/prices.json`。可按供应商缩小查价范围。开启定时查价后，价格页会显示下次检查时间，结果需确认后应用。官方已公布的内置费率会按用量时间和 UTC 生效日期计算，手动价格优先。
 
 ## Linux 命令参考
 

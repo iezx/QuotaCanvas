@@ -20,6 +20,23 @@
 
 ### Linux
 
+#### 一键安装与自动升级
+
+需要 systemd、Git 和 Python 3.10+（含 `venv`）。Debian / Ubuntu 缺少依赖时，先执行 `sudo apt install git python3-venv`。用运行 Agent 的普通 Linux 用户执行：
+
+```bash
+git clone https://github.com/iezx/QuotaCanvas.git "$HOME/QuotaCanvas" &&
+  bash "$HOME/QuotaCanvas/install.sh"
+```
+
+**首次安装必须在终端设置并确认 10–256 个字符的面板密码。** 密码保存成功后，脚本才会安装 Python 依赖、启动面板和启用自动升级。取消或未完成会停止安装，可以重新运行脚本。已有有效密码会继续使用。默认把数据保存到 `~/.local/share/quotacanvas`，启用 `quotacanvas.service` 开机启动，并每天检查 Git 更新。打开 [http://127.0.0.1:8088](http://127.0.0.1:8088) 登录。
+
+如果已经克隆，在原目录执行 `QUOTACANVAS_INSTALL_DIR="$PWD" bash install.sh`。如果用过自定义 `QUOTACANVAS_DATA_DIR`，先设为原来的绝对路径。已有自定义同名服务可继续按下方手动升级步骤维护。
+
+每天先核对本机和上游的版本号及 Git 提交。提交相同就跳过，上游版本较旧也会跳过。同一版本有新的上游提交时，可以照常快进更新。确认有可安装的更新后，脚本会备份数据到 `~/.local/state/quotacanvas-backups`，更新代码，并重启正在运行的面板。可以用 `systemctl --user start quotacanvas-update.service` 立即检查，用 `systemctl --user disable --now quotacanvas-update.timer` 关闭定时更新。已经用旧脚本安装的用户，更新到本版后重新运行一次 `install.sh`，让已安装的更新服务使用新的版本检查规则。
+
+#### 手动安装
+
 需要 Python 3.10 或更新版本。Debian / Ubuntu 如缺少虚拟环境支持，先执行 `sudo apt install python3-venv`。
 
 ```bash

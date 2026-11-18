@@ -20,6 +20,23 @@ Use the main window to change your password, start QuotaCanvas at sign-in, or sh
 
 ### Linux
 
+#### One-command setup and automatic updates
+
+Requires systemd, Git, and Python 3.10+ with `venv`. On Debian or Ubuntu, install missing packages with `sudo apt install git python3-venv`. Run these commands as the regular Linux user who runs your agents.
+
+```bash
+git clone https://github.com/iezx/QuotaCanvas.git "$HOME/QuotaCanvas" &&
+  bash "$HOME/QuotaCanvas/install.sh"
+```
+
+**On a fresh install, set and confirm a 10–256 character dashboard password in the terminal.** The installer waits for the password to be saved before installing Python dependencies, starting the dashboard, or enabling automatic updates. If you cancel or leave setup incomplete, the installer stops. Run it again to continue. Existing valid passwords are reused. It stores data in `~/.local/share/quotacanvas` by default, enables `quotacanvas.service` at boot, and checks Git for updates daily. Sign in at [http://127.0.0.1:8088](http://127.0.0.1:8088).
+
+If you already cloned the project, run `QUOTACANVAS_INSTALL_DIR="$PWD" bash install.sh` in that checkout. If you use a custom `QUOTACANVAS_DATA_DIR`, set it to the same absolute path first. Use the manual upgrade steps below for an existing custom service with the same name.
+
+The daily check compares the installed and upstream version numbers and Git revisions. It skips identical revisions and older versions. A newer commit with the same version number can still fast-forward. Before applying an update, the script backs up your data to `~/.local/state/quotacanvas-backups`, updates the checkout, and restarts the running dashboard. Run `systemctl --user start quotacanvas-update.service` to check immediately, or `systemctl --user disable --now quotacanvas-update.timer` to turn off scheduled updates. If you installed with an earlier script, run the updated `install.sh` once to give the installed updater the new version check.
+
+#### Manual setup
+
 Requires Python 3.10 or later. On Debian or Ubuntu, run `sudo apt install python3-venv` if virtual environments are unavailable.
 
 ```bash

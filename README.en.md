@@ -35,6 +35,67 @@ Set a 10–256 character dashboard password when prompted. Open [http://127.0.0.
 
 Run QuotaCanvas under the same Linux account you use for your agents. The default log homes are `~/.codex`, `~/.gemini/antigravity-cli`, `~/.claude`, and `~/.dsh`. Override them with `CODEX_HOME`, `AGY_HOME`, `CLAUDE_HOME`, and `DSH_HOME`.
 
+### Persist Linux data
+
+The default data directory is `data/` inside the installation. Keep the dashboard password, prices, schedules, history, and Cloudflare configuration in a separate directory on local disk. Run the following as the Linux user who runs QuotaCanvas.
+
+```bash
+install -d -m 700 "$HOME/.local/share/quotacanvas"
+export QUOTACANVAS_DATA_DIR="$HOME/.local/share/quotacanvas"
+```
+
+To move an existing installation’s data, stop the dashboard and confirm that the destination is empty. From the old installation directory, run `cp -a -- data/. "$QUOTACANVAS_DATA_DIR/"`. If you already use a custom data directory, keep using that path. Each agent stores its original conversations and logs separately. Back those up as well if you move to a different host.
+
+Set the same `QUOTACANVAS_DATA_DIR` before starting the dashboard or resetting its password in a terminal. For startup at boot, set it in the systemd service.
+
+### Start at boot with systemd
+
+Run `.venv/bin/python server.py` once from the installation directory as the same Linux user. Sign in to verify the setup, then press Ctrl+C. Run `mkdir -p ~/.config/systemd/user` and save the following as `~/.config/systemd/user/quotacanvas.service`.
+
+```ini
+[Unit]
+Description=QuotaCanvas
+
+[Service]
+WorkingDirectory=%h/QuotaCanvas
+Environment=QUOTACANVAS_DATA_DIR=%h/.local/share/quotacanvas
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/QuotaCanvas/.venv/bin/python server.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+This example uses `~/QuotaCanvas`. Adjust `WorkingDirectory` and `ExecStart` to match your installation. Set `QUOTACANVAS_DATA_DIR` in `Environment` to your existing data path. Add the directories for any agents or cloudflared installed outside the listed paths to `PATH`. Put existing flags such as `--lan-host` after `server.py`.
+
+```bash
+sudo loginctl enable-linger "$(id -un)"
+systemctl --user daemon-reload
+systemctl --user enable --now quotacanvas.service
+systemctl --user status quotacanvas.service
+```
+
+`enable-linger` allows the user service to start at boot and keep running after sign-out. Use `journalctl --user -u quotacanvas.service -n 50` to view logs or `systemctl --user disable --now quotacanvas.service` to stop the service and disable startup.
+
+### Upgrade an existing Linux installation
+
+1. Stop the dashboard. Press Ctrl+C if it runs in a terminal. For the user service above, run `systemctl --user stop quotacanvas.service`. For a system service, run `sudo systemctl stop <service-name>`.
+2. Open your existing QuotaCanvas installation directory as the same Linux user. If you configured `QUOTACANVAS_DATA_DIR` at startup, set it to that same absolute path in this shell. Run `git status --short --branch` and save any source changes before proceeding. The commands below back up your data before updating the code and dependencies.
+
+   ```bash
+   data_dir="${QUOTACANVAS_DATA_DIR:-$PWD/data}"
+   backup_dir=$(mktemp -d "$HOME/quotacanvas-backup.XXXXXX") &&
+     cp -a -- "$data_dir" "$backup_dir/data" &&
+     printf '%s\n' "$backup_dir" &&
+     git pull --ff-only &&
+     .venv/bin/python -m pip install -r requirements.txt
+   ```
+
+3. Once all commands succeed, start the dashboard with your previous options. The default command is `.venv/bin/python server.py`. For systemd, keep the existing unit’s options and data directory. Run `systemctl --user start quotacanvas.service` for the user service or `sudo systemctl start <service-name>` for a system service. Reload the dashboard and sign in with your existing password.
+
+If you installed from a source archive, stop the dashboard and back up the data directory. Then extract the new release to a separate directory and recreate `.venv` using the Linux installation steps above. Copy the old installation’s `data/` into the new directory or continue using the same `QUOTACANVAS_DATA_DIR`. If the systemd unit points to a path that changed, update its working directory and startup command, then reload it with `systemctl --user daemon-reload` for a user service or `sudo systemctl daemon-reload` for a system service before starting it. Keep the old directory until you verify the upgrade.
+
 ## Use the dashboard
 
 - **Usage overview** shows tokens, API-equivalent costs, and recent output rates. Sort models by tokens or cost. Model IDs come from the logs, and unpriced models still count toward token totals.
@@ -60,8 +121,6 @@ Activate `.venv` in the project folder. Stop the existing process before changin
 | `python server.py --once` | Collect once, print the summary, and exit |
 | `python server.py --web-cache "$HOME/.cache/quotacanvas/web"` | Serve static pages from a snapshot on local disk |
 | `python server.py --help` | List all startup options |
-
-Keep `data/` when updating. If your project disk cannot enforce private permissions, set `export QUOTACANVAS_DATA_DIR="$HOME/.local/share/quotacanvas"` and use the same path for startup and password resets.
 
 ## Windows command reference
 
@@ -111,29 +170,6 @@ If Cloudflare lists **Access: Apps** and **Access: Policies** separately, give b
 
 Allow outbound TCP or UDP 7844 for `cloudflared`. The tunnel uses loopback as its origin, and you can keep a separate LAN entry with `--lan-host`. Grant access only to people you trust to send instructions to your local agents. [Cloudflare connectivity checks](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/troubleshoot-tunnels/connectivity-prechecks/)
 
-### Start at boot or stop remote access
+### Reconnect or stop the tunnel
 
 Turn on **Connect tunnel when QuotaCanvas starts** in Settings to reconnect an enabled tunnel at startup. With the option off, select **Connect tunnel** from the local or LAN dashboard. Select **Disable** to stop the current tunnel connection.
-
-To start the dashboard at boot on Linux, install the project and its `.venv` in `~/.local/opt/quotacanvas`. Start it manually once to set the password. Save the following as `~/.config/systemd/user/quotacanvas.service`.
-
-```ini
-[Unit]
-Description=QuotaCanvas
-
-[Service]
-WorkingDirectory=%h/.local/opt/quotacanvas
-ExecStart=%h/.local/opt/quotacanvas/.venv/bin/python server.py
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-```
-
-```bash
-loginctl enable-linger "$USER"
-systemctl --user daemon-reload
-systemctl --user enable --now quotacanvas.service
-```
-
-Check the service with `systemctl --user status quotacanvas.service`. To stop it and turn off startup, run `systemctl --user disable --now quotacanvas.service`.

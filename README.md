@@ -35,6 +35,67 @@ python server.py
 
 使用同一个 Linux 用户登录 Agent 和运行 QuotaCanvas。日志默认位于 `~/.codex`、`~/.gemini/antigravity-cli`、`~/.claude` 和 `~/.dsh`。可以用 `CODEX_HOME`、`AGY_HOME`、`CLAUDE_HOME` 和 `DSH_HOME` 指定其他位置。
 
+### 持久化 Linux 数据
+
+默认数据目录是安装目录下的 `data/`。建议把面板密码、价格、计划任务、历史记录和 Cloudflare 配置放在独立的本机目录。以下命令在运行面板的 Linux 用户下执行。
+
+```bash
+install -d -m 700 "$HOME/.local/share/quotacanvas"
+export QUOTACANVAS_DATA_DIR="$HOME/.local/share/quotacanvas"
+```
+
+迁移已有安装时，先停止面板，再确认目标目录为空，然后在原安装目录运行 `cp -a -- data/. "$QUOTACANVAS_DATA_DIR/"`。如果已经使用自定义数据目录，继续沿用该路径即可。Agent 的原始对话和日志存放在各自的目录，迁移到另一台主机时需要单独备份。
+
+之后从终端启动或重设密码时，先设置相同的 `QUOTACANVAS_DATA_DIR`。开机启动则在 systemd 服务里设置该路径。
+
+### 使用 systemd 开机启动
+
+以同一个 Linux 用户在安装目录手动执行一次 `.venv/bin/python server.py`。确认能登录后按 Ctrl+C。用 `mkdir -p ~/.config/systemd/user` 创建目录，将以下内容保存为 `~/.config/systemd/user/quotacanvas.service`。
+
+```ini
+[Unit]
+Description=QuotaCanvas
+
+[Service]
+WorkingDirectory=%h/QuotaCanvas
+Environment=QUOTACANVAS_DATA_DIR=%h/.local/share/quotacanvas
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/QuotaCanvas/.venv/bin/python server.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+示例假设程序安装在 `~/QuotaCanvas`。按实际安装位置调整 `WorkingDirectory` 和 `ExecStart`。使用自定义数据路径时，调整 `Environment` 中的 `QUOTACANVAS_DATA_DIR`。如果 Agent 或 cloudflared 安装在其他位置，将其目录加入 `PATH`。原来使用的 `--lan-host` 等参数追加在 `server.py` 后面。
+
+```bash
+sudo loginctl enable-linger "$(id -un)"
+systemctl --user daemon-reload
+systemctl --user enable --now quotacanvas.service
+systemctl --user status quotacanvas.service
+```
+
+`enable-linger` 让用户服务在开机后启动，并在退出登录后继续运行。用 `journalctl --user -u quotacanvas.service -n 50` 查看日志，用 `systemctl --user disable --now quotacanvas.service` 停止服务并关闭开机启动。
+
+### 升级 Linux 上的已有安装
+
+1. 停止面板。终端启动的实例按 Ctrl+C。使用上面的 systemd 用户服务时，执行 `systemctl --user stop quotacanvas.service`。使用系统服务时，执行 `sudo systemctl stop <服务名>`。
+2. 用原来的 Linux 用户进入已有的 QuotaCanvas 安装目录。如果启动时设置过 `QUOTACANVAS_DATA_DIR`，先在当前终端设为同一个绝对路径。先执行 `git status --short --branch`，若有源码改动，先保存改动再继续。下面的命令会先备份数据，再更新代码和依赖。
+
+   ```bash
+   data_dir="${QUOTACANVAS_DATA_DIR:-$PWD/data}"
+   backup_dir=$(mktemp -d "$HOME/quotacanvas-backup.XXXXXX") &&
+     cp -a -- "$data_dir" "$backup_dir/data" &&
+     printf '%s\n' "$backup_dir" &&
+     git pull --ff-only &&
+     .venv/bin/python -m pip install -r requirements.txt
+   ```
+
+3. 上面的命令全部成功后，用原来的参数启动。默认命令是 `.venv/bin/python server.py`。使用 systemd 时，保留原数据路径和启动参数。用户服务执行 `systemctl --user start quotacanvas.service`，系统服务执行 `sudo systemctl start <服务名>`。刷新面板，用原密码登录。
+
+若原来从源码压缩包安装，停止面板并备份数据目录后，解压新版到新目录，按上面的 Linux 安装步骤重建 `.venv`。把旧安装的 `data/` 复制到新目录，或继续使用原来的 `QUOTACANVAS_DATA_DIR`。如果用 systemd 且安装路径变了，把服务的工作目录和启动命令改为新路径，用 `systemctl --user daemon-reload`（用户服务）或 `sudo systemctl daemon-reload`（系统服务）重新加载后再启动。保留旧目录，直到新版验证完成。
+
 ## 使用面板
 
 - **用量总览**显示 tokens、API 等价费用和近期输出速度，可以按 tokens 或费用对模型排序。模型 ID 来自日志，未定价的模型仍计入 tokens。
@@ -60,8 +121,6 @@ python server.py
 | `python server.py --once` | 采集一次，输出摘要后退出 |
 | `python server.py --web-cache "$HOME/.cache/quotacanvas/web"` | 使用本地磁盘上的静态页面快照 |
 | `python server.py --help` | 查看全部启动参数 |
-
-更新时保留 `data/`。如果项目所在磁盘无法限制数据目录权限，使用 `export QUOTACANVAS_DATA_DIR="$HOME/.local/share/quotacanvas"`，并在每次启动和重置密码时使用同一路径。
 
 ## Windows 命令参考
 
@@ -111,29 +170,6 @@ cloudflared --version
 
 允许 `cloudflared` 通过 TCP 或 UDP 7844 发起出站连接。Tunnel 连接本机回环地址，可以用 `--lan-host` 保留单独的内网入口。面板能向本机 Agent 发送指令，请只授权可信用户。 [Cloudflare 网络连接检查](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/troubleshoot-tunnels/connectivity-prechecks/)
 
-### 开机启动和停用
+### 隧道自动连接和停用
 
 在设置中打开「面板启动时自动连接隧道」，已启用的 Tunnel 会在面板启动后自动连接。关闭此选项后，可以从本机或内网点击「启动连接」。要立即断开公网入口，点击「停用」。
-
-要让面板随 Linux 开机启动，把项目及其 `.venv` 安装在 `~/.local/opt/quotacanvas`，先手动启动一次并设置密码。将下列内容保存为 `~/.config/systemd/user/quotacanvas.service`。
-
-```ini
-[Unit]
-Description=QuotaCanvas
-
-[Service]
-WorkingDirectory=%h/.local/opt/quotacanvas
-ExecStart=%h/.local/opt/quotacanvas/.venv/bin/python server.py
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-```
-
-```bash
-loginctl enable-linger "$USER"
-systemctl --user daemon-reload
-systemctl --user enable --now quotacanvas.service
-```
-
-运行 `systemctl --user status quotacanvas.service` 查看服务状态。运行 `systemctl --user disable --now quotacanvas.service` 停止面板并关闭开机启动。
